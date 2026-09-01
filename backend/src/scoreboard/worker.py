@@ -46,7 +46,7 @@ def main() -> int:
             if results:
                 ok = sum(1 for r in results if r["ok"])
                 log.info("refreshed %s/%s due sources", ok, len(results))
-        except Exception:  # noqa: BLE001 - the loop must outlive any single pass
+        except Exception:
             log.exception("pass failed; continuing")
 
         # Sleep in short steps so shutdown is prompt rather than up to a full tick.

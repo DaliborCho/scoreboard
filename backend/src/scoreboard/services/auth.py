@@ -12,7 +12,7 @@ once a customer has more than one office.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -98,7 +98,7 @@ def start_session(
         user_id=user.id,
         prefix=prefix,
         token_hash=hashed,
-        expires_at=datetime.now(timezone.utc) + ttl,
+        expires_at=datetime.now(UTC) + ttl,
     )
     session.add(row)
     session.commit()
@@ -114,7 +114,7 @@ def resolve_session(session: Session, token: str) -> AuthContext | None:
     if not token:
         return None
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     candidates = session.scalars(
         select(UserSession).where(
             UserSession.prefix == token[:TOKEN_PREFIX_LENGTH],
@@ -149,7 +149,7 @@ def resolve_session(session: Session, token: str) -> AuthContext | None:
 
 
 def revoke_session(session: Session, row: UserSession) -> None:
-    row.revoked_at = datetime.now(timezone.utc)
+    row.revoked_at = datetime.now(UTC)
     session.commit()
 
 
@@ -160,7 +160,7 @@ def revoke_all_for_user(session: Session, user_id: int) -> int:
             UserSession.user_id == user_id, UserSession.revoked_at.is_(None)
         )
     ).all()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for row in rows:
         row.revoked_at = now
     session.commit()

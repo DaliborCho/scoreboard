@@ -45,7 +45,13 @@ def rank(rows: list[dict], metric: str) -> list[dict]:
     """
     if metric not in RANKABLE:
         metric = "net_split"
-    ordered = sorted(rows, key=lambda r: (float(r.get(metric) or 0), r.get("rep_name", "")), reverse=True)
+    ordered = sorted(
+        rows,
+        # Name breaks a tie, so an unchanged board does not reshuffle between
+        # refreshes and make people think a number moved.
+        key=lambda r: (float(r.get(metric) or 0), r.get("rep_name", "")),
+        reverse=True,
+    )
     for position, row in enumerate(ordered, start=1):
         row["rank"] = position
     return ordered

@@ -12,7 +12,7 @@ raised.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -25,9 +25,6 @@ from scoreboard.services.refresh import apply_records
 from scoreboard.tenancy import TenantScope
 
 log = logging.getLogger("scoreboard.scheduler")
-
-# How long a source may run before the worker gives up waiting on this pass.
-STUCK_AFTER = timedelta(minutes=30)
 
 
 # No matter what interval a customer types, we do not hammer their reporting
@@ -63,7 +60,7 @@ def due_sources(session: Session, now: datetime | None = None) -> list[DataSourc
     for one customer, it is servicing all of them, which is the single place
     in the system that legitimately crosses the boundary.
     """
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     candidates = session.scalars(
         select(DataSource).where(DataSource.is_enabled.is_(True))
     ).all()
@@ -72,7 +69,7 @@ def due_sources(session: Session, now: datetime | None = None) -> list[DataSourc
 
 def refresh_source(session: Session, source: DataSource, now: datetime | None = None) -> dict:
     """Refresh one source. Never raises; the outcome is recorded on the row."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     scope = TenantScope(session, source.org_id)
     outcome = {"source_id": source.id, "org_id": source.org_id, "ok": False}
 
@@ -90,7 +87,7 @@ def refresh_source(session: Session, source: DataSource, now: datetime | None = 
         outcome["error"] = str(exc)
         log.warning("source %s (org %s) failed: %s", source.id, source.org_id, exc)
         return outcome
-    except Exception as exc:  # noqa: BLE001 - one bad source must not stop the loop
+    except Exception as exc:
         source.last_run_at = now
         source.last_status = f"Unexpected error: {exc.__class__.__name__}"
         session.commit()

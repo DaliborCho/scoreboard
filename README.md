@@ -74,6 +74,15 @@ until a browser refuses to run the script and shows a blank screen. This does:
 python tools/check_pages.py
 ```
 
+And this fails if a model has changed without a migration — drift is invisible
+in development and surfaces as a broken deploy:
+
+```bash
+DATABASE_URL=... python tools/check_migrations.py
+```
+
+`.github/workflows/ci.yml` runs all three on every push.
+
 ## Layout
 
 ```
@@ -167,6 +176,20 @@ team's palette on its own card, while the whole-office board wears the
 organization's, so no single team's brand takes over a screen that belongs to
 everybody.
 
+## Displays
+
+A television carries a long unguessable link instead of signing in, and can
+either sit on one screen or cycle through several. The next screen in a cycle
+is chosen by the server and carried in the payload, so a rotation edited in the
+console takes effect on the next tick rather than when someone remembers to
+reload the wall.
+
+Uploaded logos are addressed by an unguessable key rather than an id, because
+a television has no session to authenticate an image request — and an
+enumerable URL would let one customer walk another's brand assets. What a file
+claims to be is not evidence: its own first bytes decide, and SVG is refused
+outright because it can carry script.
+
 ## Charts
 
 Six types: big number, bar, donut, trend, gauge and leader list. The list is
@@ -186,11 +209,11 @@ console and television front ends, four display modes, themes with enforced
 contrast, six chart types, the Tableau and push connectors, daily metric
 history, and a background worker that refreshes sources on their interval.
 
-Not built yet: object storage for uploaded logos (a logo is a URL for now),
-email delivery — so an administrator creates an account and hands over a first
-password instead of sending an invitation — password reset, per-screen
-rotation, and billing.
+Not built yet: email delivery — so an administrator creates an account and
+hands over a first password instead of sending an invitation, and resets one
+the same way — object storage (uploads go to a mounted volume, which is one
+adapter away from S3), per-organization timezones, and billing.
 
-Known rough edges: widgets on a head-to-head board still show office-wide
-figures rather than the two selected teams; the console edits teams through
-browser prompts rather than a proper dialog.
+Rate limiting counts per process. With one API container that is exact; with
+several it becomes per-container, which weakens the limit without breaking
+anything. Moving the counters to Redis is a change to one file.

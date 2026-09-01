@@ -15,6 +15,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import logging
 import re
 import urllib.error
 import urllib.parse
@@ -27,6 +28,8 @@ from scoreboard.connectors.base import (
     SourceError,
     SourceRecord,
 )
+
+log = logging.getLogger("scoreboard.tableau")
 
 DEFAULT_API_VERSION = "3.22"
 REQUEST_TIMEOUT = 60
@@ -114,6 +117,25 @@ def rep_key_for(name: str) -> str:
     return key or "unknown"
 
 
+def _feed(bucket: dict, field: str, raw, long_format: bool, lead_id: str) -> None:
+    """Add one measured value to a rep's running totals.
+
+    Takes the row's context as arguments rather than closing over the loop
+    variables. It happened to be correct as a closure because it was only ever
+    called within the same iteration, but that is a property nobody can see
+    from the function itself.
+    """
+    value = clean_number(raw)
+    if value is None:
+        return
+    if long_format and field in COUNT_FIELDS and lead_id:
+        # A lead covering several products appears on several rows. Count it
+        # once; dollars still sum across them.
+        bucket.setdefault(field, {}).setdefault(lead_id, value)
+    else:
+        bucket[field] = bucket.get(field, 0.0) + value
+
+
 def parse_csv(csv_text: str, mapping: dict | None = None) -> list[SourceRecord]:
     """Turn a Tableau view export into normalized records.
 
@@ -178,24 +200,15 @@ def parse_csv(csv_text: str, mapping: dict | None = None) -> list[SourceRecord]:
             if value and value.lower() != "all" and not info.get(key):
                 info[key] = value
 
-        def feed(field: str, raw) -> None:
-            value = clean_number(raw)
-            if value is None:
-                return
-            if long_format and field in COUNT_FIELDS and lead_id:
-                totals[name].setdefault(field, {}).setdefault(lead_id, value)
-            else:
-                totals[name][field] = totals[name].get(field, 0.0) + value
-
         if long_format:
             field = match_field(norm(row.get(measure_name_col) or ""))
             if field:
-                feed(field, row.get(measure_value_col))
+                _feed(totals[name], field, row.get(measure_value_col), long_format, lead_id)
         else:
             for header, header_norm in header_norms.items():
                 field = explicit.get(header) or match_field(header_norm)
                 if field:
-                    feed(field, row.get(header))
+                    _feed(totals[name], field, row.get(header), long_format, lead_id)
 
     records = []
     for name in order:
@@ -265,8 +278,8 @@ class TableauConnector(Connector):
         if status == 200:
             try:
                 version = json.loads(raw)["serverInfo"]["restApiVersion"]
-            except Exception:
-                pass
+            except (ValueError, KeyError, TypeError) as exc:
+                log.debug("serverinfo did not report a version (%s); using %s", exc, version)
         return f"{self.server}/api/{version}"
 
     def signin(self) -> tuple[str, str, str]:
@@ -302,8 +315,10 @@ class TableauConnector(Connector):
     def signout(self, base: str, token: str) -> None:
         try:
             self._request(f"{base}/auth/signout", method="POST", token=token)
-        except Exception:
-            pass
+        except SourceError as exc:
+            # A failed sign-out is not worth failing a refresh over; the token
+            # expires on its own. Recorded so it is not entirely invisible.
+            log.debug("Tableau sign-out failed: %s", exc)
 
     # ------------------------------------------------------------ content
     @staticmethod
@@ -366,7 +381,9 @@ class TableauConnector(Connector):
             str(v.get("viewUrlName") or v.get("name") or "?")
             for v in self._views(base, token, site_id)[:20]
         )
-        raise SourceError(f"View '{target}' not found. Views in this workbook: {visible or '(none)'}")
+        raise SourceError(
+            f"View '{target}' not found. Views in this workbook: {visible or '(none)'}"
+        )
 
     def _query_view_csv(self, base, token, site_id, view_id, period, filters) -> str:
         params = {"maxAge": "1"}

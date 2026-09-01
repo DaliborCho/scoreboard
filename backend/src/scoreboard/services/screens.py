@@ -15,7 +15,7 @@ from datetime import date
 
 from scoreboard.connectors.base import Period
 from scoreboard.domain import charts
-from scoreboard.domain.leaderboard import MODES
+from scoreboard.domain.leaderboard import MODES, UNASSIGNED
 from scoreboard.domain.metrics import METRIC_BY_KEY
 from scoreboard.domain.theme import FONTS, resolve
 from scoreboard.models import Screen, Team, Theme
@@ -98,10 +98,21 @@ def render(
     needs_trend = any(w.get("type") == "trend" for w in widget_specs)
     trend_points = trend(scope, period, rank_by) if needs_trend else []
 
+    # Widgets count the same people the board is showing. A head-to-head
+    # screen that puts an office-wide total above two competing teams invites
+    # exactly the wrong reading of the number.
+    widget_rows = rows
+    if mode == "per_team":
+        focus_name = payload.get("team", "")
+        widget_rows = [r for r in rows if (r.get("team") or UNASSIGNED) == focus_name]
+    elif mode == "team_vs_team":
+        shown = {entry.get("team") for entry in payload.get("teams", [])}
+        widget_rows = [r for r in rows if (r.get("team") or UNASSIGNED) in shown]
+
     widgets, widget_errors = [], []
     for spec in widget_specs:
         try:
-            widgets.append(charts.build(spec, rows, trend_points))
+            widgets.append(charts.build(spec, widget_rows, trend_points))
         except charts.ChartError as exc:
             # Surfaced rather than dropped: a silently missing chart on a wall
             # looks like the product is broken, with nothing to explain it.
@@ -125,6 +136,7 @@ def render(
             "theme": theme,
             "widgets": widgets,
             "widget_errors": widget_errors,
+            "widget_scope": {"mode": mode, "reps_counted": len(widget_rows)},
             "period": {"start": period.start.isoformat(), "end": period.end.isoformat()},
             "rep_count": len(rows),
         }

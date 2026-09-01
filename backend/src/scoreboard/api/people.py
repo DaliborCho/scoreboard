@@ -225,3 +225,50 @@ def remove_person(
 
     revoked = revoke_all_for_user(session, membership.user_id)
     return {"ok": True, "sessions_ended": revoked}
+
+
+@router.post("/{membership_id}/reset-password")
+def reset_password(
+    membership_id: int,
+    context: AuthContext = Depends(admin_only),
+    scope: TenantScope = Depends(user_scope),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Set a new password for someone and show it once.
+
+    Without mail delivery this is the only way back in for a person who has
+    forgotten theirs. It is restricted to an administrator of an organization
+    the person actually belongs to, and every session of theirs ends, so a
+    reset cannot be used to quietly ride an existing login.
+    """
+    membership = scope.get(Membership, membership_id)
+    if membership is None:
+        raise HTTPException(status_code=404, detail="Person not found in this organization.")
+    if membership.role == Role.owner and context.role != Role.owner:
+        raise HTTPException(status_code=403, detail="Only an owner can reset an owner's password.")
+
+    user = session.get(User, membership.user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="Account not found.")
+
+    from scoreboard.security import hash_password
+
+    password = secrets.token_urlsafe(12)
+    user.password_hash = hash_password(password)
+    session.commit()
+
+    ended = revoke_all_for_user(session, user.id)
+    audit.record(
+        scope, "user.password_reset", actor_user_id=context.user.id,
+        actor_label=context.user.email, target=user.email,
+        detail={"sessions_ended": ended},
+    )
+    scope.commit()
+
+    return {
+        "ok": True,
+        "email": user.email,
+        "new_password": password,
+        "sessions_ended": ended,
+        "note": "Shown once. Hand it over directly; it is stored hashed.",
+    }

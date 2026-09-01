@@ -26,6 +26,8 @@ services:
       - ./backend/src:/app/src
       - ./backend/tests:/app/tests
       - ./backend/alembic:/app/alembic
+      - ./backend/pyproject.toml:/app/pyproject.toml:ro
+      - asset-data:/data/assets
     depends_on:
       db:
         condition: service_healthy
@@ -48,3 +50,4 @@ services:
 
 volumes:
   postgres-data:
+  asset-data:

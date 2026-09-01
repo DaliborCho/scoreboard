@@ -94,7 +94,7 @@ def main() -> int:
 
     print("\n" + "=" * 72)
     print(f"  Console sign-in  {OWNER_EMAIL} / {OWNER_PASSWORD}")
-    print(f"  Console          http://localhost:8000/console")
+    print("  Console          http://localhost:8000/console")
     if api_token:
         print(f"  Ingest API key   {api_token}")
     else:

@@ -37,6 +37,12 @@ def catalogue() -> list[dict]:
 
 
 __all__ = [
-    "ConnectionResult", "Connector", "Period", "SourceError", "SourceRecord",
-    "REGISTRY", "build", "catalogue",
+    "REGISTRY",
+    "ConnectionResult",
+    "Connector",
+    "Period",
+    "SourceError",
+    "SourceRecord",
+    "build",
+    "catalogue",
 ]

@@ -35,7 +35,7 @@ from scoreboard.db import Base
 GLOBAL_TABLES = {"users"}
 
 
-class Role(str, enum.Enum):
+class Role(enum.StrEnum):
     owner = "owner"
     org_admin = "org_admin"
     branch_manager = "branch_manager"
@@ -61,7 +61,7 @@ class Organization(Base, TimestampMixin):
     slug: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
-    branches: Mapped[list["Branch"]] = relationship(back_populates="organization")
+    branches: Mapped[list[Branch]] = relationship(back_populates="organization")
 
 
 class User(Base, TimestampMixin):
@@ -125,7 +125,7 @@ class Branch(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
 
     organization: Mapped[Organization] = relationship(back_populates="branches")
-    teams: Mapped[list["Team"]] = relationship(back_populates="branch")
+    teams: Mapped[list[Team]] = relationship(back_populates="branch")
 
 
 class Team(Base, TimestampMixin):
@@ -257,6 +257,13 @@ class DisplayToken(Base, TimestampMixin):
     prefix: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     screen_id: Mapped[int | None] = mapped_column(ForeignKey("screens.id", ondelete="SET NULL"))
+
+    # Optional cycle: {"screen_ids": [1, 2], "seconds": 30}. Empty means the
+    # display simply stays on `screen_id`. Rotation lives on the television
+    # rather than on the screen, because the same screen is often shown on one
+    # wall permanently and in a cycle on another.
+    rotation: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -292,6 +299,27 @@ class Theme(Base, TimestampMixin):
     team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"))
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     tokens: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+
+class Asset(Base, TimestampMixin):
+    """An uploaded brand image.
+
+    `public_key` is what appears in a URL. A television has no session and
+    cannot send a token for an image, so the link has to stand on its own —
+    and being random rather than sequential is what stops one customer from
+    walking another's assets by counting upward.
+    """
+
+    __tablename__ = "assets"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+    public_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    filename: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    content_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    uploaded_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
 
 
 class AuditLog(Base):

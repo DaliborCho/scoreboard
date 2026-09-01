@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from scoreboard.domain.metrics import METRIC_BY_KEY, RANKABLE, roll_up
+from scoreboard.domain.metrics import ADDITIVE, METRIC_BY_KEY, RANKABLE, roll_up
 
 MAX_SERIES = 8  # Beyond this a board becomes a colour-matching puzzle.
 
@@ -40,8 +40,6 @@ CHART_BY_KEY = {c.key: c for c in CHART_TYPES}
 
 # A share-of-total chart is only meaningful for values that add up. Averaging a
 # close rate into a pie slice is a lie about what the slice represents.
-from scoreboard.domain.metrics import ADDITIVE  # noqa: E402
-
 SHARE_SAFE = set(ADDITIVE)
 
 
@@ -141,7 +139,7 @@ def build(widget: dict, rows: list[dict], trend_points: list[dict] | None = None
         if remainder > 0:
             # Named, not dropped. A donut whose slices do not sum to the whole
             # is the classic way a chart quietly misleads.
-            trimmed = trimmed + [{"label": "Other", "value": remainder}]
+            trimmed = [*trimmed, {"label": "Other", "value": remainder}]
         payload["total"] = total
     elif len(series) > len(trimmed):
         payload["hidden"] = len(series) - len(trimmed)

@@ -10,7 +10,7 @@ every refresh, which is the whole reason the original product existed.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 from sqlalchemy import select
 
@@ -48,7 +48,7 @@ def apply_records(
     captured_on: date | None = None,
 ) -> RefreshResult:
     result = RefreshResult()
-    captured_on = captured_on or datetime.now(timezone.utc).date()
+    captured_on = captured_on or datetime.now(UTC).date()
 
     existing = {rep.rep_key: rep for rep in scope.all(Rep)}
 
@@ -106,7 +106,7 @@ def apply_records(
             )
         else:
             metrics.values = values
-            metrics.captured_at = datetime.now(timezone.utc)
+            metrics.captured_at = datetime.now(UTC)
         result.metrics_written += 1
 
     scope.commit()

@@ -13,6 +13,7 @@ dependencies = [
     "pydantic-settings>=2.6",
     "cryptography>=44.0",
     "argon2-cffi>=23.1",
+    "python-multipart>=0.0.20",
 ]
 
 [project.optional-dependencies]
@@ -36,3 +37,34 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "DTZ", "RUF", "S", "BLE"]
+ignore = [
+    # Depends(...) in an argument default is the FastAPI idiom, not a mistake.
+    "B008",
+    # The executable bit comes from the Windows bind mount, not from the file.
+    "EXE002",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# urlopen against a URL built from saved connection settings, not user input;
+# and a broad catch so one malformed Tableau response cannot end a refresh.
+"src/scoreboard/connectors/tableau.py" = ["S310", "BLE001"]
+# Seeded RNG for demo figures. Nothing here is a secret.
+"src/scoreboard/connectors/mock.py" = ["S311"]
+# Constant *names* that look like secrets to a scanner; the values are
+# placeholders, and the real ones come from the environment.
+"src/scoreboard/config.py" = ["S105"]
+"src/scoreboard/seed.py" = ["S105"]
+# A failed decrypt must return a clean error, whatever the library raised.
+"src/scoreboard/security.py" = ["BLE001"]
+# The health endpoint reports a database problem rather than becoming one.
+"src/scoreboard/api/routes.py" = ["BLE001"]
+# Tests assert on behaviour; asserts and hard-coded sample credentials are the
+# point of them.
+"tests/*" = ["S101", "S105", "S106", "BLE001"]
+# The worker and scheduler catch broadly on purpose: one customer's broken
+# source must not end the pass for everybody else.
+"src/scoreboard/worker.py" = ["BLE001"]
+"src/scoreboard/services/scheduler.py" = ["BLE001"]

@@ -13,7 +13,7 @@ decides for itself which organization it is serving.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import Depends, Header, HTTPException, Path, status
 from sqlalchemy import select
@@ -55,7 +55,7 @@ def api_key_scope(
     ).all()
     for key in candidates:
         if token_matches(token, key.token_hash):
-            key.last_used_at = datetime.now(timezone.utc)
+            key.last_used_at = datetime.now(UTC)
             session.commit()
             return TenantScope(session, key.org_id)
 
@@ -74,7 +74,7 @@ def display_scope(
     ).all()
     for display in candidates:
         if token_matches(token, display.token_hash):
-            display.last_seen_at = datetime.now(timezone.utc)
+            display.last_seen_at = datetime.now(UTC)
             session.commit()
             return TenantScope(session, display.org_id), display
 

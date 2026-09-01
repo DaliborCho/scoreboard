@@ -26,7 +26,6 @@ def test_every_customer_table_carries_org_id():
 
 
 def test_scope_refuses_a_model_without_org_id():
-    scope = TenantScope.__new__(TenantScope)
     with pytest.raises(TypeError) as exc:
         TenantScope._require_scoped(User)
     assert "org_id" in str(exc.value)

@@ -173,6 +173,7 @@ def board_trend(
 
 @display.get("/{token}/screen")
 def display_screen(
+    screen_id: int | None = Query(default=None),
     period_start: date | None = None,
     period_end: date | None = None,
     scoped=Depends(display_scope),
@@ -187,9 +188,30 @@ def display_screen(
     from scoreboard.services.screens import render
 
     scope, display_token = scoped
-    screen = scope.get(Screen, display_token.screen_id) if display_token.screen_id else None
     period = _period(period_start, period_end)
+
+    rotation = display_token.rotation or {}
+    # Only ids still in the configured cycle are honoured, so a stale link a
+    # television kept from an earlier configuration cannot pin it to a screen
+    # that was removed from the rotation.
+    cycle = [
+        sid for sid in (rotation.get("screen_ids") or [])
+        if scope.get(Screen, sid) is not None
+    ]
+
+    wanted = screen_id if screen_id in cycle else (cycle[0] if cycle else display_token.screen_id)
+    screen = scope.get(Screen, wanted) if wanted else None
 
     payload = render(scope, screen, period=period)
     payload["display"] = {"name": display_token.name}
+    payload["rotation"] = (
+        {
+            "screen_ids": cycle,
+            "seconds": int(rotation.get("seconds") or 30),
+            "current": wanted,
+            "next": cycle[(cycle.index(wanted) + 1) % len(cycle)] if wanted in cycle else None,
+        }
+        if len(cycle) > 1
+        else None
+    )
     return payload

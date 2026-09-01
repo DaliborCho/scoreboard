@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import UTC, date, datetime
 
 
 @dataclass
@@ -18,8 +18,11 @@ class Period:
     end: date
 
     @classmethod
-    def current_month(cls, today: date | None = None) -> "Period":
-        today = today or date.today()
+    def current_month(cls, today: date | None = None) -> Period:
+        # UTC, not the container's local date. A per-organization timezone is
+        # the right answer and is not built yet; an ambiguous "today" that
+        # depends on where the server happens to run is the worse of the two.
+        today = today or datetime.now(UTC).date()
         first = today.replace(day=1)
         nxt = first.replace(year=first.year + 1, month=1) if first.month == 12 \
             else first.replace(month=first.month + 1)

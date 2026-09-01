@@ -3,12 +3,12 @@
 The decision "should this run now" is pure, so these tests move the clock
 instead of waiting on it.
 """
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from scoreboard.models import DataSource
 from scoreboard.services.scheduler import MIN_INTERVAL_SECONDS, is_due
 
-NOW = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
 
 
 def source(**overrides) -> DataSource:

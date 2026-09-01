@@ -127,6 +127,13 @@ tfoot td {
 const TOKEN = location.pathname.split("/").filter(Boolean).pop();
 const ENDPOINT = `/api/v1/display/${encodeURIComponent(TOKEN)}/screen`;
 
+// When a television is cycling, the next screen is chosen by the server and
+// carried in the payload. The page never keeps its own list, so a rotation
+// edited in the console takes effect on the next tick instead of when
+// somebody remembers to reload the wall.
+let nextScreenId = null;
+let rotateSeconds = null;
+
 let refreshSeconds = 20;
 let consecutiveFailures = 0;
 let lastGood = null;
@@ -466,11 +473,20 @@ function render(data) {
     showStatus("", false);
   }
   refreshSeconds = Math.max(Number(data.screen.refresh_seconds) || 20, 5);
+
+  if (data.rotation && data.rotation.next) {
+    nextScreenId = data.rotation.next;
+    rotateSeconds = Math.max(Number(data.rotation.seconds) || 30, 5);
+  } else {
+    nextScreenId = null;
+    rotateSeconds = null;
+  }
 }
 
 async function tick() {
+  const url = nextScreenId ? `${ENDPOINT}?screen_id=${nextScreenId}` : ENDPOINT;
   try {
-    const response = await fetch(ENDPOINT, { cache: "no-store" });
+    const response = await fetch(url, { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
     lastGood = Date.now();
@@ -488,7 +504,10 @@ async function tick() {
       consecutiveFailures > 3
     );
   } finally {
-    setTimeout(tick, refreshSeconds * 1000);
+    // While cycling, the rotation interval governs; otherwise it is the
+    // screen's own refresh rate.
+    const wait = nextScreenId ? rotateSeconds : refreshSeconds;
+    setTimeout(tick, Math.max(wait || refreshSeconds, 5) * 1000);
   }
 }
 

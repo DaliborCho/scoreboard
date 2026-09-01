@@ -12,7 +12,8 @@ from sqlalchemy.orm import Session
 
 from scoreboard.api.deps import auth_context, require_role, user_scope
 from scoreboard.db import get_session
-from scoreboard.domain import charts, theme as theme_domain
+from scoreboard.domain import charts
+from scoreboard.domain import theme as theme_domain
 from scoreboard.domain.leaderboard import MODES
 from scoreboard.models import DisplayToken, Role, Screen, Team, Theme
 from scoreboard.services import audit
@@ -279,3 +280,48 @@ def attach_screen(
     )
     scope.commit()
     return {"ok": True, "display_id": display.id, "screen_id": display.screen_id}
+
+
+class RotationRequest(BaseModel):
+    screen_ids: list[int] = Field(default_factory=list, max_length=12)
+    seconds: int = Field(default=30, ge=5, le=3600)
+
+
+@router.post("/display-tokens/{display_id}/rotation")
+def set_rotation(
+    display_id: int,
+    payload: RotationRequest,
+    context: AuthContext = Depends(require_role(Role.branch_manager)),
+    scope: TenantScope = Depends(user_scope),
+) -> dict:
+    """Cycle a television through several screens.
+
+    An empty list clears the cycle and the display goes back to sitting on one
+    screen. Every id is checked now rather than at render time, so a deleted
+    screen cannot leave a wall showing an error at 6am.
+    """
+    display = scope.get(DisplayToken, display_id)
+    if display is None:
+        raise HTTPException(status_code=404, detail="Display not found.")
+
+    missing = [sid for sid in payload.screen_ids if scope.get(Screen, sid) is None]
+    if missing:
+        raise HTTPException(
+            status_code=404, detail=f"No such screen: {', '.join(str(m) for m in missing)}."
+        )
+
+    display.rotation = (
+        {"screen_ids": payload.screen_ids, "seconds": payload.seconds}
+        if payload.screen_ids
+        else {}
+    )
+    if payload.screen_ids:
+        display.screen_id = payload.screen_ids[0]
+
+    audit.record(
+        scope, "display_token.rotation", actor_user_id=context.user.id,
+        actor_label=context.user.email, target=display.name,
+        detail=display.rotation,
+    )
+    scope.commit()
+    return {"ok": True, "rotation": display.rotation}

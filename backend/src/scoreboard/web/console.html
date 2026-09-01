@@ -81,6 +81,11 @@ h2 { font-size: 21px; margin-bottom: .3rem; }
 .ratio b.ok { color: #7ee2a8; } .ratio b.no { color: #ff9a92; }
 .preview { border-radius: 8px; padding: 1rem; margin-top: .8rem; }
 .widgetrow { display: grid; grid-template-columns: 1.1fr 1.2fr 1fr .8fr auto; gap: .5rem; align-items: end; margin-bottom: .5rem; }
+
+#modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex;
+         align-items: center; justify-content: center; padding: 1.5rem; z-index: 60; }
+#modal .card { max-width: 34rem; width: 100%; max-height: 82vh; overflow: auto; margin: 0; }
+.moverow { display: grid; grid-template-columns: 1fr 12rem; gap: .5rem; align-items: center; margin-bottom: .4rem; }
 </style>
 </head>
 <body>
@@ -100,11 +105,13 @@ h2 { font-size: 21px; margin-bottom: .3rem; }
     <h1>Scoreboard</h1>
     <div id="nav"></div>
     <div class="who" id="who"></div>
-    <button id="logout" style="margin-top:.6rem">Sign out</button>
+    <button id="passwd" style="margin-top:.6rem">Change password</button>
+    <button id="logout" style="margin-top:.3rem">Sign out</button>
   </nav>
   <main id="view"></main>
 </div>
 
+<div id="modal" hidden></div>
 <div id="toast"></div>
 
 <script>
@@ -243,6 +250,49 @@ function section(title, hint, html) {
 const onClick = (selector, handler) =>
   $("view").querySelectorAll(selector).forEach(node => node.onclick = () => handler(node));
 
+// Replaces window.prompt and window.confirm. Beyond being unstyled and
+// unable to validate, both are blocked outright in some embedded browsers,
+// where a delete button would silently do nothing at all.
+function dialog(title, bodyHtml, onConfirm, confirmLabel = "Save") {
+  const host = $("modal");
+  host.innerHTML = `<div class="card">
+      <h3>${esc(title)}</h3>
+      <div id="dlg-body" class="stack">${bodyHtml}</div>
+      <div class="row" style="margin-top:1rem;justify-content:flex-end">
+        <div class="fixed"><button id="dlg-cancel">Cancel</button></div>
+        <div class="fixed"><button class="primary" id="dlg-ok">${esc(confirmLabel)}</button></div>
+      </div>
+    </div>`;
+  host.hidden = false;
+
+  const close = () => { host.hidden = true; host.innerHTML = ""; document.removeEventListener("keydown", onKey); };
+  const onKey = (e) => { if (e.key === "Escape") close(); };
+  document.addEventListener("keydown", onKey);
+  $("dlg-cancel").onclick = close;
+  host.onclick = (e) => { if (e.target === host) close(); };
+  $("dlg-ok").onclick = async () => {
+    try { await onConfirm(close); }
+    catch (error) { toast(error.message, "bad"); }
+  };
+  const first = host.querySelector("input, select");
+  if (first) first.focus();
+}
+
+function confirmAsync(message, confirmLabel = "Yes, do it") {
+  return new Promise(resolve => {
+    let answered = false;
+    dialog("Please confirm",
+      `<div class="hint" style="white-space:pre-line">${esc(message)}</div>`,
+      async (close) => { answered = true; close(); resolve(true); }, confirmLabel);
+    // Cancelling, pressing Escape or clicking away all mean "no".
+    const host = $("modal");
+    const observer = new MutationObserver(() => {
+      if (host.hidden && !answered) { observer.disconnect(); resolve(false); }
+    });
+    observer.observe(host, { attributes: true, attributeFilter: ["hidden"] });
+  });
+}
+
 async function guard(action) {
   try { await action(); } catch (error) { toast(error.message, "bad"); }
 }
@@ -302,28 +352,49 @@ views.teams = async () => {
     toast("Team created", "good"); render();
   });
 
-  onClick("[data-edit]", node => guard(async () => {
-    const team = teams.find(t => t.id === Number(node.dataset.edit));
-    const name = prompt("Team name", team.name); if (name === null) return;
-    const lead = prompt("Team lead", team.lead_name); if (lead === null) return;
-    await api(`/teams/${team.id}`, { method: "PATCH", body: JSON.stringify({
-      name, lead_name: lead, lead_role: team.lead_role, branch_id: team.branch_id }) });
-    toast("Saved", "good"); render();
-  }));
+  const ROLES = ["Sales Manager", "SMIT", "General Manager", "Other"];
 
-  onClick("[data-del]", node => guard(async () => {
+  onClick("[data-edit]", node => {
+    const team = teams.find(t => t.id === Number(node.dataset.edit));
+    dialog(`Edit ${team.name}`, `
+      <div><label>Team name</label><input id="e-name" value="${esc(team.name)}"></div>
+      <div><label>Team lead</label><input id="e-lead" value="${esc(team.lead_name)}"></div>
+      <div><label>Lead role</label><select id="e-role">${ROLES.map(r =>
+        `<option ${r === team.lead_role ? "selected" : ""}>${r}</option>`).join("")}</select></div>`,
+      async (close) => {
+        const name = $("e-name").value.trim();
+        if (!name) throw new Error("A team needs a name.");
+        await api(`/teams/${team.id}`, { method: "PATCH", body: JSON.stringify({
+          name, lead_name: $("e-lead").value.trim(),
+          lead_role: $("e-role").value, branch_id: team.branch_id }) });
+        close(); toast("Saved", "good"); render();
+      });
+  });
+
+  onClick("[data-del]", node => {
     const id = Number(node.dataset.del);
+    const team = teams.find(t => t.id === id);
     const members = reps.filter(r => r.team_id === id);
-    const reassign = {};
-    for (const member of members) {
-      const options = teams.filter(t => t.id !== id).map(t => `${t.id}=${t.name}`).join(", ");
-      const answer = prompt(`Move ${member.name} to which team id?\n${options}\n(blank = Unassigned)`, "");
-      if (answer === null) return;
-      reassign[member.id] = answer.trim() ? Number(answer.trim()) : null;
-    }
-    await api(`/teams/${id}/delete`, { method: "POST", body: JSON.stringify({ reassign }) });
-    toast("Team deleted", "good"); render();
-  }));
+    const options = teams.filter(t => t.id !== id);
+
+    dialog(`Delete ${team.name}`, members.length
+      ? `<div class="hint">Every member needs somewhere to go. Deleting a team never deletes people.</div>
+         ${members.map(m => `<div class="moverow">
+           <span>${esc(m.name)}</span>
+           <select data-move="${m.id}">
+             <option value="">— Unassigned —</option>
+             ${options.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join("")}
+           </select></div>`).join("")}`
+      : `<div class="hint">This team has no members. It can be removed straight away.</div>`,
+      async (close) => {
+        const reassign = {};
+        $("modal").querySelectorAll("[data-move]").forEach(select => {
+          reassign[Number(select.dataset.move)] = select.value ? Number(select.value) : null;
+        });
+        await api(`/teams/${id}/delete`, { method: "POST", body: JSON.stringify({ reassign }) });
+        close(); toast("Team deleted", "good"); render();
+      }, "Delete team");
+  });
 };
 
 views.people = async () => {
@@ -376,9 +447,11 @@ views.theme = async () => {
       <div class="swatchgrid" style="margin-top:1rem">${catalogue.color_tokens.map(key =>
         `<div><label>${key}</label><input type="color" data-tok="${key}" value="${tokens[key]}"></div>`).join("")}</div>
       <div class="row" style="margin-top:1rem">
-        <div><label>Logo URL (optional)</label><input data-tok="logo_url" placeholder="https://…"></div>
+        <div><label>Logo</label><input data-tok="logo_url" placeholder="upload below, or paste a URL"></div>
+        <div><label>Upload an image</label><input type="file" id="th-logo" accept="image/png,image/jpeg,image/webp,image/gif"></div>
         <div class="fixed"><button class="primary" id="th-save">Save theme</button></div>
       </div>
+      <div class="hint" id="th-logo-note" style="margin:.4rem 0 0"></div>
     </div>
     <div class="card"><h3>Readability</h3><div id="th-ratios"></div>
       <div class="preview" id="th-prev"></div></div>`);
@@ -408,6 +481,7 @@ views.theme = async () => {
     $("th-prev").style.cssText =
       `background:${r.background};color:${r.text};font-family:${report.font_stack}`;
     $("th-prev").innerHTML =
+      (r.logo_url ? `<img src="${esc(r.logo_url)}" alt="" style="max-height:44px;margin-bottom:.5rem">` : "") +
       `<div style="font-size:26px;font-weight:800">SALES LEADERBOARD</div>
        <div style="color:${r.muted};letter-spacing:.1em;font-size:12px">SECONDARY TEXT</div>
        <div style="background:${r.surface};border-top:4px solid ${r.primary};padding:.7rem;margin-top:.7rem;border-radius:6px">
@@ -428,6 +502,25 @@ views.theme = async () => {
     refresh();
   };
   $("th-target").onchange();
+
+  $("th-logo").onchange = () => guard(async () => {
+    const file = $("th-logo").files[0];
+    if (!file) return;
+    $("th-logo-note").textContent = "Uploading…";
+    // Sent as multipart rather than a data URL: the server decides what the
+    // file is from its own bytes, and a base64 blob in a theme token would
+    // travel with every board refresh.
+    const body = new FormData();
+    body.append("file", file);
+    const response = await fetch("/api/v1/assets", {
+      method: "POST", body, headers: { Authorization: "Bearer " + state.token },
+    });
+    const result = await response.json();
+    if (!response.ok) { $("th-logo-note").textContent = ""; throw new Error(describe(result.detail)); }
+    $("view").querySelector('[data-tok="logo_url"]').value = result.url;
+    $("th-logo-note").textContent = `Uploaded ${result.filename} (${Math.round(result.size_bytes / 1024)}KB). Save the theme to apply it.`;
+    refresh();
+  });
 
   $("th-save").onclick = () => guard(async () => {
     const target = $("th-target").value;
@@ -537,7 +630,7 @@ views.screens = async () => {
   }));
 
   onClick("[data-delscreen]", node => guard(async () => {
-    if (!confirm("Delete this screen?")) return;
+    if (!await confirmAsync("Delete this screen?")) return;
     await api(`/screens/${node.dataset.delscreen}/delete`, { method: "POST" });
     toast("Screen deleted", "good"); render();
   }));
@@ -550,6 +643,15 @@ views.displays = async () => {
       <div><label>Name</label><input id="d-name" placeholder="Front office TV"></div>
       <div class="fixed"><button class="primary" id="d-add">Create link</button></div>
     </div></div>
+    <div class="card"><h3>Rotation</h3>
+      <div class="hint" style="margin-bottom:.7rem">A television can cycle through several screens. Leave the list empty and it stays on one.</div>
+      <div class="row">
+        <div><label>Television</label><select id="r-display">${displays.filter(d => !d.revoked).map(d =>
+          `<option value="${d.id}">${esc(d.name)}</option>`).join("")}</select></div>
+        <div><label>Seconds per screen</label><input id="r-seconds" type="number" min="5" max="3600" value="30"></div>
+        <div class="fixed"><button class="primary" id="r-save">Save cycle</button></div>
+      </div>
+      <div id="r-list" style="margin-top:.7rem"></div></div>
     <div class="card"><table>
       <thead><tr><th class="l">Display</th><th class="l">Showing</th><th class="l">Last seen</th><th></th></tr></thead>
       <tbody>${displays.map(d => `<tr>
@@ -578,6 +680,48 @@ views.displays = async () => {
     toast("Display created", "good");
   });
 
+  const drawCycle = () => {
+    const chosen = new Set((state.cache.cycle || []));
+    $("r-list").innerHTML = screens.length
+      ? screens.map(sc => `<label style="display:flex;gap:.5rem;align-items:center;text-transform:none;letter-spacing:0;font-size:14px;color:var(--text);margin-bottom:.3rem">
+          <input type="checkbox" data-cyc="${sc.id}" ${chosen.has(sc.id) ? "checked" : ""} style="width:auto">
+          ${esc(sc.name)} <span class="pill">${esc(sc.mode)}</span>
+          ${chosen.has(sc.id) ? `<span class="pill on">#${[...chosen].indexOf(sc.id) + 1} in cycle</span>` : ""}
+        </label>`).join("")
+      : `<div class="hint">Create a screen first.</div>`;
+    $("r-list").querySelectorAll("[data-cyc]").forEach(box => box.onchange = () => {
+      const id = Number(box.dataset.cyc);
+      // Order is the order they were ticked, which is the order they appear
+      // on the wall — so the list is a sequence, not a set.
+      const cycle = (state.cache.cycle || []).filter(x => x !== id);
+      if (box.checked) cycle.push(id);
+      state.cache.cycle = cycle;
+      drawCycle();
+    });
+  };
+
+  $("r-display").onchange = () => {
+    const display = displays.find(d => d.id === Number($("r-display").value));
+    state.cache.cycle = (display?.rotation?.screen_ids) || [];
+    $("r-seconds").value = display?.rotation?.seconds || 30;
+    drawCycle();
+  };
+  if (displays.some(d => !d.revoked)) $("r-display").onchange();
+
+  $("r-save").onclick = () => guard(async () => {
+    const result = await api(`/display-tokens/${$("r-display").value}/rotation`, {
+      method: "POST",
+      body: JSON.stringify({
+        screen_ids: state.cache.cycle || [],
+        seconds: Number($("r-seconds").value) || 30,
+      }),
+    });
+    toast(result.rotation.screen_ids
+      ? `Cycling ${result.rotation.screen_ids.length} screens every ${result.rotation.seconds}s`
+      : "Cycle cleared; the display stays on one screen.", "good");
+    render();
+  });
+
   $("view").querySelectorAll("[data-attach]").forEach(select => select.onchange = () => guard(async () => {
     await api(`/display-tokens/${select.dataset.attach}/screen`, { method: "POST",
       body: JSON.stringify({ screen_id: select.value ? Number(select.value) : null }) });
@@ -585,7 +729,7 @@ views.displays = async () => {
   }));
 
   onClick("[data-revoke]", node => guard(async () => {
-    if (!confirm("Revoke this link? The television will stop working immediately.")) return;
+    if (!await confirmAsync("Revoke this link? The television will stop working immediately.")) return;
     await api(`/display-tokens/${node.dataset.revoke}/revoke`, { method: "POST" });
     toast("Revoked", "good"); render();
   }));
@@ -616,7 +760,8 @@ views.access = async () => {
         <td class="l">${roleSelect(p.membership_id, p.role)}</td>
         <td class="l">${p.team_id ? esc(teams.find(t => t.id === p.team_id)?.name || "team " + p.team_id)
                         : p.branch_id ? "branch " + p.branch_id : "&mdash;"}</td>
-        <td><button class="sm danger" data-remove="${p.membership_id}">Remove</button></td>
+        <td><button class="sm" data-reset="${p.membership_id}">Reset password</button>
+            <button class="sm danger" data-remove="${p.membership_id}">Remove</button></td>
       </tr>`).join("")}</tbody>
     </table></div>`);
 
@@ -641,8 +786,17 @@ views.access = async () => {
     toast("Role changed. Their sessions were ended.", "good"); render();
   }));
 
+  onClick("[data-reset]", node => guard(async () => {
+    if (!await confirmAsync("Set a new password? Their current one stops working and every session ends.")) return;
+    const result = await api(`/users/${node.dataset.reset}/reset-password`, { method: "POST" });
+    $("view").insertAdjacentHTML("afterbegin",
+      `<div class="card" style="border-color:var(--good)"><h3>New password for ${esc(result.email)}</h3>
+        <code>${esc(result.new_password)}</code>
+        <div class="hint" style="margin-top:.5rem">${esc(result.note)} ${result.sessions_ended} session(s) ended.</div></div>`);
+  }));
+
   onClick("[data-remove]", node => guard(async () => {
-    if (!confirm("Remove their access? Any signed-in session ends immediately.")) return;
+    if (!await confirmAsync("Remove their access? Any signed-in session ends immediately.")) return;
     const result = await api(`/users/${node.dataset.remove}/remove`, { method: "POST" });
     toast(`Removed. ${result.sessions_ended} session(s) ended.`, "good"); render();
   }));
@@ -710,7 +864,7 @@ views.data = async () => {
   }));
 
   onClick("[data-delsrc]", node => guard(async () => {
-    if (!confirm("Delete this source and its stored credential?\nNumbers it already loaded stay on the board.")) return;
+    if (!await confirmAsync("Delete this source and its stored credential?\nNumbers it already loaded stay on the board.")) return;
     await api(`/sources/${node.dataset.delsrc}/delete`, { method: "POST" });
     toast("Source deleted", "good"); render();
   }));
@@ -726,7 +880,7 @@ views.data = async () => {
   });
 
   onClick("[data-krevoke]", node => guard(async () => {
-    if (!confirm("Revoke this key? Anything pushing with it stops immediately.")) return;
+    if (!await confirmAsync("Revoke this key? Anything pushing with it stops immediately.")) return;
     await api(`/api-keys/${node.dataset.krevoke}/revoke`, { method: "POST" });
     toast("Revoked", "good"); render();
   }));
@@ -755,6 +909,17 @@ async function render() {
 
 $("li-go").onclick = signIn;
 $("li-pass").onkeydown = (e) => { if (e.key === "Enter") signIn(); };
+$("passwd").onclick = () => dialog("Change your password", `
+  <div><label>Current password</label><input id="p-old" type="password" autocomplete="current-password"></div>
+  <div><label>New password</label><input id="p-new" type="password" autocomplete="new-password"></div>
+  <div class="hint">At least 10 characters. Your other sessions will end; this one stays signed in.</div>`,
+  async (close) => {
+    const result = await api("/auth/password", { method: "POST", body: JSON.stringify({
+      current_password: $("p-old").value, new_password: $("p-new").value }) });
+    close();
+    toast(`Password changed. ${result.other_sessions_ended} other session(s) ended.`, "good");
+  }, "Change it");
+
 $("logout").onclick = () => guard(async () => { await api("/auth/logout", { method: "POST" }); signOut(); });
 
 if (state.token) start(); else { $("login").hidden = false; }

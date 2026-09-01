@@ -44,7 +44,8 @@ def test_donut_refuses_a_rate():
 
 
 def test_donut_accepts_an_additive_metric():
-    assert charts.validate_widget({"type": "donut", "metric": "net_split", "group_by": "team"}) == []
+    widget = {"type": "donut", "metric": "net_split", "group_by": "team"}
+    assert charts.validate_widget(widget) == []
 
 
 def test_bad_target_is_rejected():
@@ -71,7 +72,9 @@ def test_bar_totals_each_team_through_the_shared_roll_up():
 
 
 def test_grouping_by_rep_lists_people():
-    widget = charts.build({"type": "leaders", "metric": "sold_leads", "group_by": "rep", "limit": 2}, rows())
+    widget = charts.build(
+        {"type": "leaders", "metric": "sold_leads", "group_by": "rep", "limit": 2}, rows()
+    )
     assert [s["label"] for s in widget["series"]] == ["A", "C"]
     assert widget["hidden"] == 2
 
@@ -96,7 +99,9 @@ def test_series_are_capped_even_when_a_larger_limit_is_asked_for():
                components={"net_split": 100 - i}).as_row()
         for i in range(20)
     ]
-    widget = charts.build({"type": "bar", "metric": "net_split", "group_by": "team", "limit": 99}, many)
+    widget = charts.build(
+        {"type": "bar", "metric": "net_split", "group_by": "team", "limit": 99}, many
+    )
     assert len(widget["series"]) == charts.MAX_SERIES
     assert widget["hidden"] == 20 - charts.MAX_SERIES
 

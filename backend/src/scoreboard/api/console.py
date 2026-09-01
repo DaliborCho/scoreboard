@@ -7,9 +7,9 @@ edit a neighbouring team.
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
@@ -30,7 +30,7 @@ from scoreboard.models import (
     Team,
 )
 from scoreboard.security import encrypt_secret, generate_token
-from scoreboard.services import audit
+from scoreboard.services import audit, ratelimit
 from scoreboard.services.auth import (
     AuthContext,
     authenticate,
@@ -56,9 +56,37 @@ class LoginRequest(BaseModel):
 
 
 @router.post("/auth/login")
-def login(payload: LoginRequest, session: Session = Depends(get_session)) -> dict:
+def login(
+    payload: LoginRequest,
+    request: Request,
+    session: Session = Depends(get_session),
+) -> dict:
+    # The account bucket is the tight one: an attacker has to fill it to make
+    # progress. The address bucket is loose, because a whole company behind
+    # one NAT — or every user behind one proxy — shares it.
+    caller = request.client.host if request.client else "unknown"
+    email_bucket = f"login:email:{payload.email.lower()}"
+    ip_bucket = f"login:ip:{caller}"
+
+    for bucket, limit, window in (
+        (email_bucket, ratelimit.LOGIN_LIMIT, ratelimit.LOGIN_WINDOW),
+        (ip_bucket, ratelimit.LOGIN_IP_LIMIT, ratelimit.LOGIN_IP_WINDOW),
+    ):
+        try:
+            ratelimit.check(bucket, limit, window)
+        except ratelimit.RateLimited as exc:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=str(exc),
+                headers={"Retry-After": str(exc.retry_after)},
+            ) from exc
+
     user = authenticate(session, payload.email, payload.password)
     if user is None:
+        # Only failures are counted. Charging a successful sign-in against the
+        # budget slowly locks out a busy office during a normal morning.
+        ratelimit.record(email_bucket, ratelimit.LOGIN_WINDOW)
+        ratelimit.record(ip_bucket, ratelimit.LOGIN_IP_WINDOW)
         # One message for a wrong password and an unknown address alike, so
         # the endpoint cannot be used to discover who has an account.
         raise HTTPException(
@@ -71,6 +99,8 @@ def login(payload: LoginRequest, session: Session = Depends(get_session)) -> dic
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This account does not belong to any organization.",
         )
+
+    ratelimit.clear(email_bucket)
 
     chosen = next((m for m in memberships if m.org_id == payload.org_id), memberships[0])
     token, row = start_session(session, user, chosen.org_id)
@@ -267,7 +297,9 @@ def delete_team(
     for rep in members:
         destination = payload.reassign.get(rep.id)
         if destination is not None and scope.get(Team, destination) is None:
-            raise HTTPException(status_code=404, detail=f"Destination team {destination} not found.")
+            raise HTTPException(
+                status_code=404, detail=f"Destination team {destination} not found."
+            )
         rep.team_id = destination
 
     audit.record(
@@ -438,12 +470,12 @@ def revoke_api_key(
     context: AuthContext = Depends(require_role(Role.org_admin)),
     scope: TenantScope = Depends(user_scope),
 ) -> dict:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     key = scope.get(ApiKey, key_id)
     if key is None:
         raise HTTPException(status_code=404, detail="API key not found.")
-    key.revoked_at = datetime.now(timezone.utc)
+    key.revoked_at = datetime.now(UTC)
     audit.record(
         scope, "api_key.revoke", actor_user_id=context.user.id,
         actor_label=context.user.email, target=key.name,
@@ -461,6 +493,7 @@ def list_display_tokens(
         "displays": [
             {
                 "id": d.id, "name": d.name, "prefix": d.prefix, "screen_id": d.screen_id,
+                "rotation": d.rotation or {},
                 "last_seen_at": d.last_seen_at.isoformat() if d.last_seen_at else None,
                 "revoked": d.revoked_at is not None,
             }
@@ -497,12 +530,12 @@ def revoke_display_token(
     context: AuthContext = Depends(require_role(Role.branch_manager)),
     scope: TenantScope = Depends(user_scope),
 ) -> dict:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     display = scope.get(DisplayToken, display_id)
     if display is None:
         raise HTTPException(status_code=404, detail="Display not found.")
-    display.revoked_at = datetime.now(timezone.utc)
+    display.revoked_at = datetime.now(UTC)
     audit.record(
         scope, "display_token.revoke", actor_user_id=context.user.id,
         actor_label=context.user.email, target=display.name,
@@ -604,7 +637,7 @@ def refresh_source(
     context: AuthContext = Depends(require_role(Role.org_admin)),
     scope: TenantScope = Depends(user_scope),
 ) -> dict:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     source = scope.get(DataSource, source_id)
     if source is None:
@@ -626,13 +659,13 @@ def refresh_source(
     try:
         records = connector.fetch(period)
     except SourceError as exc:
-        source.last_run_at = datetime.now(timezone.utc)
+        source.last_run_at = datetime.now(UTC)
         source.last_status = str(exc)[:500]
         scope.commit()
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     result = apply_records(scope, records, period)
-    source.last_run_at = datetime.now(timezone.utc)
+    source.last_run_at = datetime.now(UTC)
     source.last_status = f"Loaded {result.reps_seen} reps"
     audit.record(
         scope, "source.refresh", actor_user_id=context.user.id,
@@ -730,3 +763,39 @@ def delete_source(
     scope.delete(source)
     scope.commit()
     return {"ok": True}
+
+
+class PasswordChange(BaseModel):
+    current_password: str = Field(min_length=1)
+    new_password: str = Field(min_length=10, max_length=200)
+
+
+@router.post("/auth/password")
+def change_password(
+    payload: PasswordChange,
+    context: AuthContext = Depends(auth_context),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Change your own password.
+
+    Every other session of yours ends, because a password change is usually
+    someone reacting to a suspicion. The session making the change survives so
+    the person is not thrown out of the page they are standing on.
+    """
+    from scoreboard.security import hash_password, verify_password
+    from scoreboard.services.auth import revoke_all_for_user
+
+    if not verify_password(payload.current_password, context.user.password_hash):
+        raise HTTPException(status_code=403, detail="Current password is incorrect.")
+    if payload.new_password == payload.current_password:
+        raise HTTPException(status_code=422, detail="That is the same password.")
+
+    context.user.password_hash = hash_password(payload.new_password)
+    session.commit()
+
+    keep = context.session_row.id
+    revoked = revoke_all_for_user(session, context.user.id)
+    context.session_row.revoked_at = None
+    session.commit()
+
+    return {"ok": True, "other_sessions_ended": max(revoked - 1, 0), "kept_session": keep}
