@@ -11,18 +11,18 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from scoreboard import __version__
-from scoreboard.api import routes
-from scoreboard.config import settings
+from scoreboard.api import console, routes
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    if settings().is_dev:
-        # Development convenience only. Production schema changes go through
-        # Alembic so they are reviewable and reversible.
-        from scoreboard.db import create_all
+    """Startup checks only.
 
-        create_all()
+    The schema is owned by Alembic in every environment, including
+    development. Creating tables from the models at boot would let the two
+    drift apart silently and would make the first production migration a
+    guess.
+    """
     yield
 
 
@@ -36,6 +36,7 @@ def create_app() -> FastAPI:
     app.include_router(routes.system)
     app.include_router(routes.ingest)
     app.include_router(routes.display)
+    app.include_router(console.router)
     return app
 
 

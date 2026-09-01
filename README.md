@@ -36,6 +36,9 @@ docker compose up -d --build
 docker compose exec api python -m scoreboard.seed
 ```
 
+The API container runs `alembic upgrade head` before serving, so the schema is
+current on every start.
+
 The seed prints an ingest API key and a display URL once. They are stored as
 hashes and cannot be read again — the same rule a real customer will get.
 
@@ -111,15 +114,33 @@ Three types, deliberately not interchangeable:
 A TV cannot log in, so it holds a long opaque URL instead. Revoking the token
 is how a relocated or lost screen is cut off.
 
+Sessions are rows, not self-contained tokens. When someone leaves a company
+the customer expects access to stop immediately, and a JWT cannot be withdrawn
+before it expires.
+
 Customer credentials we hold — a Tableau token, for instance — are encrypted
 at rest and never returned by the API. Tokens we issue are stored as hashes.
 
+## Roles
+
+`owner > org_admin > branch_manager > team_lead > viewer`
+
+Rank answers "how senior". It is never the whole answer for anything
+team-shaped, because a team lead has full authority over one team and none
+over the next, so those endpoints also run a scope check. That is what lets a
+customer hand a team lead their own logo and colours without handing them
+everyone else's.
+
+`tests/test_auth.py` fails if a mutating endpoint is added without a
+credential dependency — the mistake that actually happens.
+
 ## Status
 
-Working: multi-tenant schema and isolation, the four display modes, metric
-rules, the Tableau and push connectors, daily metric history, API key and
-display token auth.
+Working: multi-tenant schema and isolation, Alembic migrations, user accounts
+with revocable sessions and role-scoped permissions, the console API (teams,
+assignments, credentials, sources, audit log), the four display modes, metric
+rules, the Tableau and push connectors, and daily metric history.
 
-Not built yet: the console (user accounts, sessions, roles), the theme editor,
-charts and the dashboard builder, scheduled refresh, object storage for logos,
-and Alembic migrations. Development currently creates tables on startup.
+Not built yet: the console front end, the theme editor, charts and the
+dashboard builder, scheduled refresh, object storage for logos, and password
+reset / invitations.

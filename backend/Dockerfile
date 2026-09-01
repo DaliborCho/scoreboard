@@ -23,6 +23,8 @@ RUN mkdir -p src/scoreboard && touch src/scoreboard/__init__.py \
 
 COPY src ./src
 COPY tests ./tests
+COPY alembic.ini ./
+COPY alembic ./alembic
 
 EXPOSE 8000
 CMD ["uvicorn", "scoreboard.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -14,18 +14,30 @@ from sqlalchemy import select
 
 from scoreboard.connectors import build
 from scoreboard.connectors.base import Period
-from scoreboard.db import create_all, session_factory
-from scoreboard.models import ApiKey, Branch, DisplayToken, Organization, Team
+from scoreboard.db import session_factory
+from scoreboard.models import (
+    ApiKey,
+    Branch,
+    DisplayToken,
+    Membership,
+    Organization,
+    Role,
+    Team,
+    User,
+)
 from scoreboard.security import generate_token
+from scoreboard.services.auth import create_user
 from scoreboard.services.refresh import apply_records
 from scoreboard.tenancy import TenantScope
 
 SLUG = "demo"
+OWNER_EMAIL = "owner@demo-company.com"
+OWNER_PASSWORD = "demo-password-change-me"
 TEAMS = ["Team Alpha", "Team Bravo", "Team Charlie", "Undisputed"]
 
 
 def main() -> int:
-    create_all()
+    """Assumes `alembic upgrade head` has already run."""
     session = session_factory()()
 
     org = session.scalars(select(Organization).where(Organization.slug == SLUG)).first()
@@ -49,6 +61,14 @@ def main() -> int:
             scope.add(Team(name=name, branch_id=branch.id, lead_name="", lead_role="Sales Manager"))
     scope.commit()
 
+    owner = session.scalars(select(User).where(User.email == OWNER_EMAIL)).first()
+    if owner is None:
+        owner = create_user(session, OWNER_EMAIL, OWNER_PASSWORD, full_name="Demo Owner")
+        session.commit()
+    if scope.one_by(Membership, user_id=owner.id) is None:
+        scope.add(Membership(user_id=owner.id, role=Role.owner))
+        scope.commit()
+
     # Load demo numbers through the same path a real source would use.
     period = Period.current_month()
     records = build("mock", config={"branch": "Olympia"}).fetch(period)
@@ -67,6 +87,7 @@ def main() -> int:
 
     print("\n" + "=" * 72)
     print("Shown once. Store them now.\n")
+    print(f"  Console sign-in  {OWNER_EMAIL} / {OWNER_PASSWORD}")
     print(f"  Ingest API key   {api_token}")
     print(f"  Display URL      http://localhost:8000/api/v1/display/{tv_token}/board")
     print("=" * 72)

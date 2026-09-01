@@ -89,6 +89,32 @@ class Membership(Base, TimestampMixin):
     team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id", ondelete="SET NULL"))
 
 
+class UserSession(Base):
+    """A signed-in person, stored server-side so it can be revoked.
+
+    Deliberately not a JWT. When someone leaves a company, or a laptop is
+    lost, the customer expects the session to stop working immediately, and a
+    self-contained token cannot offer that.
+
+    `org_id` is the organization the session is currently acting as. A person
+    who belongs to several switches between them rather than juggling headers.
+    """
+
+    __tablename__ = "user_sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    prefix: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 # ---------------------------------------------------------------- organization structure
 class Branch(Base, TimestampMixin):
     __tablename__ = "branches"
