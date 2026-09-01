@@ -1,0 +1,73 @@
+from scoreboard.domain.leaderboard import (
+    RepRow,
+    all_teams,
+    rank,
+    team_totals,
+    team_vs_team,
+    whole_office,
+)
+
+
+def rows():
+    def rep(name, team, issued, sold, gross, net):
+        return RepRow(
+            rep_key=name.lower().replace(" ", "-"),
+            rep_name=name,
+            team=team,
+            components={
+                "issued_leads": issued, "pitched_leads": issued * 0.7, "sold_leads": sold,
+                "gross_split": gross, "pending_split": 0, "net_split": net,
+            },
+        ).as_row()
+
+    return [
+        rep("Andre Okafor", "Undisputed", 50, 20, 200_000, 180_000),
+        rep("Lena Kovac", "Undisputed", 40, 12, 130_000, 120_000),
+        rep("Marcus Reed", "Team Alpha", 30, 9, 90_000, 84_000),
+        rep("Dana Whitfield", "Team Alpha", 20, 4, 40_000, 36_000),
+    ]
+
+
+def test_rank_is_always_highest_first():
+    ranked = rank(rows(), "net_split")
+    assert [r["rank"] for r in ranked] == [1, 2, 3, 4]
+    assert ranked[0]["rep_name"] == "Andre Okafor"
+
+
+def test_unknown_rank_metric_falls_back_instead_of_raising():
+    ranked = rank(rows(), "not_a_metric")
+    assert ranked[0]["rep_name"] == "Andre Okafor"
+
+
+def test_team_total_equals_sum_of_its_members():
+    totals = team_totals(rows(), "net_split")
+    undisputed = next(t for t in totals if t["team"] == "Undisputed")
+    assert undisputed["net_split"] == 300_000
+    assert undisputed["issued_leads"] == 90
+    assert undisputed["rep_count"] == 2
+    assert round(undisputed["close_rate"], 4) == round(32 / 90 * 100, 4)
+
+
+def test_whole_office_total_matches_every_rep():
+    board = whole_office(rows(), "net_split")
+    assert board["total"]["net_split"] == 420_000
+    assert board["total"]["issued_leads"] == 140
+    assert len(board["reps"]) == 4
+
+
+def test_team_vs_team_is_capped_at_two_and_labels_a_winner():
+    board = team_vs_team(rows(), ["Undisputed", "Team Alpha", "Team Bravo"], "net_split")
+    assert len(board["teams"]) == 2
+    assert board["teams"][0]["placement"] == "WINNER"
+    assert board["teams"][1]["placement"] == ""
+
+
+def test_all_teams_mvp_follows_the_ranking_metric():
+    by_net = all_teams(rows(), "net_split")
+    undisputed = next(t for t in by_net["teams"] if t["team"] == "Undisputed")
+    assert undisputed["mvp"]["rep_name"] == "Andre Okafor"
+
+    by_close = all_teams(rows(), "close_rate")
+    alpha = next(t for t in by_close["teams"] if t["team"] == "Team Alpha")
+    # Marcus closes 9/30 = 30%, Dana 4/20 = 20%.
+    assert alpha["mvp"]["rep_name"] == "Marcus Reed"

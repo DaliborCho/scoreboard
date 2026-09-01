@@ -1,0 +1,12 @@
+SR-Name,LEAD-Id,USER-Home Branch,Team Lead Name,Measure Names,Measure Values
+Marcus Reed,L-1,Olympia,Team Alpha,Issued Leads,1
+Marcus Reed,L-1,Olympia,Team Alpha,Gross Split,10000
+Marcus Reed,L-1,Olympia,Team Alpha,Issued Leads,1
+Marcus Reed,L-1,Olympia,Team Alpha,Gross Split,5000
+Marcus Reed,L-2,Olympia,Team Alpha,Issued Leads,1
+Marcus Reed,L-2,Olympia,Team Alpha,Sold Leads,1
+Marcus Reed,L-2,Olympia,Team Alpha,Gross Split,20000
+Marcus Reed,All,Olympia,Team Alpha,Issued Leads,999
+Marcus Reed,All,Olympia,Team Alpha,Gross Split,999999
+Dana Whitfield,L-3,Olympia,Team Alpha,Issued Leads,1
+Dana Whitfield,L-3,Olympia,Team Alpha,Net Split,7500

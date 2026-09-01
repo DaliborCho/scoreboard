@@ -1,0 +1,29 @@
+# secrets
+.env
+*.pem
+*.key
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# node
+node_modules/
+dist/
+.vite/
+
+# data
+*.db
+*.sqlite3
+postgres-data/
+
+# os / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

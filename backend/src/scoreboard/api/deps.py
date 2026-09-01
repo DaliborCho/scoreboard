@@ -1,0 +1,78 @@
+"""Request-level authentication and tenant resolution.
+
+Three separate credential types, deliberately not interchangeable:
+
+* **API keys** identify a machine pushing data in. Write-only.
+* **Display tokens** identify a television. Read-only, and they never carry
+  an organization's settings — only what one screen needs to render.
+* **User sessions** identify a person in the console. (Added with the auth
+  router; not yet issued.)
+
+Each resolves to a `TenantScope`, so no handler ever sees a raw session or
+decides for itself which organization it is serving.
+"""
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+from fastapi import Depends, Header, HTTPException, Path, status
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from scoreboard.db import get_session
+from scoreboard.models import ApiKey, DisplayToken
+from scoreboard.security import TOKEN_PREFIX_LENGTH, token_matches
+from scoreboard.tenancy import TenantScope
+
+
+def _unauthorized(detail: str) -> HTTPException:
+    return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail)
+
+
+def api_key_scope(
+    authorization: str = Header(default=""),
+    session: Session = Depends(get_session),
+) -> TenantScope:
+    if not authorization.lower().startswith("bearer "):
+        raise _unauthorized("Missing bearer token.")
+    token = authorization[7:].strip()
+    if not token:
+        raise _unauthorized("Missing bearer token.")
+
+    # Look up by prefix, then verify the hash. The prefix is indexed; the
+    # comparison is constant time.
+    candidates = session.scalars(
+        select(ApiKey).where(
+            ApiKey.prefix == token[:TOKEN_PREFIX_LENGTH],
+            ApiKey.revoked_at.is_(None),
+        )
+    ).all()
+    for key in candidates:
+        if token_matches(token, key.token_hash):
+            key.last_used_at = datetime.now(timezone.utc)
+            session.commit()
+            return TenantScope(session, key.org_id)
+
+    raise _unauthorized("Invalid or revoked API key.")
+
+
+def display_scope(
+    token: str = Path(...),
+    session: Session = Depends(get_session),
+) -> tuple[TenantScope, DisplayToken]:
+    candidates = session.scalars(
+        select(DisplayToken).where(
+            DisplayToken.prefix == token[:TOKEN_PREFIX_LENGTH],
+            DisplayToken.revoked_at.is_(None),
+        )
+    ).all()
+    for display in candidates:
+        if token_matches(token, display.token_hash):
+            display.last_seen_at = datetime.now(timezone.utc)
+            session.commit()
+            return TenantScope(session, display.org_id), display
+
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="This display link is not valid. It may have been revoked.",
+    )
