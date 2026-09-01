@@ -59,11 +59,20 @@ verify certificates. See `backend/certs/README.md`.
 docker compose exec api pytest -q
 ```
 
-Two kinds live here. Behaviour tests cover metric and leaderboard rules, and
-Tableau parsing against recorded exports — so no live credential is ever
-needed to develop. Architecture guards in `tests/test_tenancy.py` fail if a
-new table appears without `org_id`, which is how tenant isolation stays a
-property of the system rather than of anyone's memory.
+Two kinds live here. Behaviour tests cover metric, leaderboard, theme, chart
+and scheduling rules, and Tableau parsing against recorded exports — so no
+live credential is ever needed to develop. Architecture guards fail if a new
+table appears without `org_id` (`tests/test_tenancy.py`) or if a mutating
+endpoint is added without a credential dependency (`tests/test_auth.py`),
+which is how those properties stay in the system rather than in anyone's
+memory.
+
+The two pages have no build step, so nothing catches a broken string literal
+until a browser refuses to run the script and shows a blank screen. This does:
+
+```bash
+python tools/check_pages.py
+```
 
 ## Layout
 
@@ -178,7 +187,9 @@ contrast, six chart types, the Tableau and push connectors, daily metric
 history, and a background worker that refreshes sources on their interval.
 
 Not built yet: object storage for uploaded logos (a logo is a URL for now),
-invitations and password reset, per-screen rotation, and billing.
+email delivery — so an administrator creates an account and hands over a first
+password instead of sending an invitation — password reset, per-screen
+rotation, and billing.
 
 Known rough edges: widgets on a head-to-head board still show office-wide
 figures rather than the two selected teams; the console edits teams through
