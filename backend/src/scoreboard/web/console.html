@@ -1,0 +1,706 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Scoreboard Console</title>
+<style>
+:root {
+  --bg: #0d1117; --panel: #161b22; --panel2: #1c2230; --line: #2a3140;
+  --text: #e6edf3; --muted: #8b949e; --accent: #4f7cff; --good: #2ea043;
+  --warn: #d29922; --bad: #f85149;
+  --radius: 10px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+/* An author `display` rule outranks the user-agent rule behind the HTML
+   `hidden` attribute, so `.wrap { display: grid }` would keep the app
+   shell on screen underneath the sign-in form. */
+[hidden] { display: none !important; }
+body {
+  background: var(--bg); color: var(--text); min-height: 100vh;
+  font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+a { color: var(--accent); }
+button {
+  font: inherit; cursor: pointer; border: 1px solid var(--line);
+  background: var(--panel2); color: var(--text);
+  padding: .45rem .85rem; border-radius: 7px;
+}
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+button.danger { border-color: #5b2020; color: #ff9a92; }
+button.sm { padding: .2rem .55rem; font-size: 13px; }
+input, select, textarea {
+  font: inherit; background: #0b0f16; color: var(--text);
+  border: 1px solid var(--line); border-radius: 7px; padding: .45rem .6rem; width: 100%;
+}
+input[type=color] { padding: 2px; height: 2.3rem; cursor: pointer; }
+label { display: block; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: .25rem; }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: .5rem .6rem; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th:first-child, td:first-child, th.l, td.l { text-align: left; }
+th { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+code { background: #0b0f16; padding: .15rem .35rem; border-radius: 4px; font-size: 13px; word-break: break-all; }
+
+.wrap { display: grid; grid-template-columns: 210px 1fr; min-height: 100vh; }
+nav { background: var(--panel); border-right: 1px solid var(--line); padding: 1rem .7rem; }
+nav h1 { font-size: 17px; margin: .2rem .5rem 1rem; }
+nav button { display: block; width: 100%; text-align: left; background: none; border: none; margin-bottom: 2px; color: var(--muted); }
+nav button.on { background: var(--panel2); color: var(--text); font-weight: 600; }
+nav .who { margin-top: 1.2rem; padding: .7rem .5rem; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+main { padding: 1.6rem 2rem; max-width: 1400px; }
+h2 { font-size: 21px; margin-bottom: .3rem; }
+.hint { color: var(--muted); font-size: 13px; margin-bottom: 1.2rem; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 1.1rem 1.2rem; margin-bottom: 1.1rem; }
+.card h3 { font-size: 15px; margin-bottom: .8rem; }
+.row { display: flex; gap: .7rem; align-items: flex-end; flex-wrap: wrap; }
+.row > * { flex: 1; min-width: 130px; }
+.row > .fixed { flex: none; }
+.grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: .8rem; }
+.pill { display: inline-block; font-size: 11px; padding: .1rem .45rem; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
+.pill.on { border-color: var(--good); color: #7ee2a8; }
+.pill.off { border-color: #5b2020; color: #ff9a92; }
+
+#toast {
+  position: fixed; right: 1.2rem; bottom: 1.2rem; max-width: 30rem;
+  padding: .8rem 1rem; border-radius: 9px; display: none; z-index: 50;
+  border: 1px solid var(--line); background: var(--panel2); white-space: pre-wrap;
+}
+#toast.show { display: block; }
+#toast.bad { border-color: var(--bad); background: #2a1214; }
+#toast.good { border-color: var(--good); background: #10261a; }
+
+#login { max-width: 22rem; margin: 12vh auto; }
+#login .card { padding: 1.6rem; }
+.stack > * + * { margin-top: .8rem; }
+
+.swatchgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: .8rem; }
+.ratio { display: flex; justify-content: space-between; padding: .3rem 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.ratio b.ok { color: #7ee2a8; } .ratio b.no { color: #ff9a92; }
+.preview { border-radius: 8px; padding: 1rem; margin-top: .8rem; }
+.widgetrow { display: grid; grid-template-columns: 1.1fr 1.2fr 1fr .8fr auto; gap: .5rem; align-items: end; margin-bottom: .5rem; }
+</style>
+</head>
+<body>
+
+<div id="login" hidden>
+  <div class="card stack">
+    <h2>Scoreboard</h2>
+    <div class="hint">Sign in to manage teams, themes and screens.</div>
+    <div><label>Email</label><input id="li-email" type="email" autocomplete="username"></div>
+    <div><label>Password</label><input id="li-pass" type="password" autocomplete="current-password"></div>
+    <button class="primary" id="li-go" style="width:100%">Sign in</button>
+  </div>
+</div>
+
+<div class="wrap" id="app" hidden>
+  <nav>
+    <h1>Scoreboard</h1>
+    <div id="nav"></div>
+    <div class="who" id="who"></div>
+    <button id="logout" style="margin-top:.6rem">Sign out</button>
+  </nav>
+  <main id="view"></main>
+</div>
+
+<div id="toast"></div>
+
+<script>
+"use strict";
+
+// ---------------------------------------------------------------- state
+const state = {
+  token: localStorage.getItem("sb_token") || "",
+  me: null,
+  tab: "board",
+  cache: {},
+};
+
+const RANK = { viewer: 0, team_lead: 1, branch_manager: 2, org_admin: 3, owner: 4 };
+const can = (minimum) => state.me && RANK[state.me.role] >= RANK[minimum];
+
+const TABS = [
+  { key: "board",     label: "Board",     min: "viewer" },
+  { key: "teams",     label: "Teams",     min: "viewer" },
+  { key: "people",    label: "People",    min: "viewer" },
+  { key: "theme",     label: "Theme",     min: "team_lead" },
+  { key: "screens",   label: "Screens",   min: "viewer" },
+  { key: "displays",  label: "Displays",  min: "branch_manager" },
+  { key: "data",      label: "Data",      min: "org_admin" },
+  { key: "audit",     label: "Audit",     min: "org_admin" },
+];
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+function toast(message, kind) {
+  const box = $("toast");
+  box.textContent = message;
+  box.className = "show " + (kind || "");
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => box.className = "", kind === "bad" ? 9000 : 4000);
+}
+
+// Server error details are structured (theme problems, widget problems,
+// stranded reps). Flattening them here means every caller gets a message a
+// person can act on instead of "[object Object]".
+function describe(detail) {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) return detail.map(describe).join("\n");
+  if (detail && typeof detail === "object") {
+    const parts = [];
+    if (detail.error) parts.push(detail.error);
+    if (detail.problems) parts.push(...detail.problems.map(p => `• ${p.token}: ${p.message}`));
+    if (detail.unassigned) parts.push("Still to move: " + detail.unassigned.map(r => r.name).join(", "));
+    if (detail.displays) parts.push("Displays: " + detail.displays.join(", "));
+    if (detail.widgets) {
+      for (const [index, issues] of Object.entries(detail.widgets)) {
+        parts.push(`Widget ${Number(index) + 1}: ${[].concat(issues).join("; ")}`);
+      }
+    }
+    if (detail.msg) parts.push(detail.msg);
+    if (parts.length) return parts.join("\n");
+  }
+  return JSON.stringify(detail);
+}
+
+async function api(path, options = {}) {
+  const response = await fetch("/api/v1" + path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(state.token ? { Authorization: "Bearer " + state.token } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  const text = await response.text();
+  const body = text ? JSON.parse(text) : {};
+  if (!response.ok) {
+    if (response.status === 401 && state.token) signOut(true);
+    throw new Error(describe(body.detail ?? body));
+  }
+  return body;
+}
+
+// ---------------------------------------------------------------- session
+async function signIn() {
+  try {
+    const result = await api("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email: $("li-email").value.trim(), password: $("li-pass").value }),
+    });
+    state.token = result.token;
+    localStorage.setItem("sb_token", result.token);
+    await start();
+  } catch (error) { toast(error.message, "bad"); }
+}
+
+function signOut(expired) {
+  state.token = ""; state.me = null;
+  localStorage.removeItem("sb_token");
+  $("app").hidden = true; $("login").hidden = false;
+  if (expired) toast("Session ended. Sign in again.", "bad");
+}
+
+async function start() {
+  try {
+    state.me = await api("/auth/me");
+  } catch { return signOut(); }
+  $("login").hidden = true; $("app").hidden = false;
+  $("who").innerHTML =
+    `<div><b>${esc(state.me.user.email)}</b></div>` +
+    `<div>${esc(state.me.organization?.name || "")}</div>` +
+    `<div class="pill">${esc(state.me.role)}</div>`;
+
+  const visible = TABS.filter(t => can(t.min));
+  if (!visible.some(t => t.key === state.tab)) state.tab = visible[0].key;
+  $("nav").innerHTML = visible
+    .map(t => `<button data-tab="${t.key}" class="${t.key === state.tab ? "on" : ""}">${t.label}</button>`)
+    .join("");
+  $("nav").querySelectorAll("button").forEach(b =>
+    b.onclick = () => { state.tab = b.dataset.tab; start(); });
+
+  render();
+}
+
+// ---------------------------------------------------------------- helpers
+const fmt = (value, kind) => {
+  const n = Number(value) || 0;
+  if (kind === "currency") return "$" + Math.round(n).toLocaleString("en-US");
+  if (kind === "percent") return n.toFixed(1) + "%";
+  if (kind === "number") return Math.round(n).toLocaleString("en-US");
+  return String(value ?? "");
+};
+
+function section(title, hint, html) {
+  $("view").innerHTML = `<h2>${esc(title)}</h2><div class="hint">${hint}</div>${html}`;
+}
+
+const onClick = (selector, handler) =>
+  $("view").querySelectorAll(selector).forEach(node => node.onclick = () => handler(node));
+
+async function guard(action) {
+  try { await action(); } catch (error) { toast(error.message, "bad"); }
+}
+
+// ---------------------------------------------------------------- views
+const views = {};
+
+views.board = async () => {
+  const data = await api("/board?mode=whole_office&rank_by=net_split");
+  const columns = ["rank", "rep_name", "team", "issued_leads", "sold_leads", "close_rate", "gross_split", "net_split", "dpl"];
+  const labels = { rank: "#", rep_name: "Rep", team: "Team", issued_leads: "Issued", sold_leads: "Sold",
+                   close_rate: "Close", gross_split: "Gross", net_split: "Net", dpl: "DPL" };
+  const kinds = { close_rate: "percent", gross_split: "currency", net_split: "currency", dpl: "currency" };
+  const cell = (rep, col) => col === "rank" ? rep.rank
+    : (col === "rep_name" || col === "team") ? esc(rep[col]) : fmt(rep[col], kinds[col] || "number");
+
+  section("Live board", `${data.rep_count} reps &middot; ${data.period.start} to ${data.period.end}`, `
+    <div class="card"><table>
+      <thead><tr>${columns.map(c => `<th class="${c === "rep_name" || c === "team" ? "l" : ""}">${labels[c]}</th>`).join("")}</tr></thead>
+      <tbody>${data.reps.map(r => `<tr>${columns.map(c =>
+        `<td class="${c === "rep_name" || c === "team" ? "l" : ""}">${cell(r, c)}</td>`).join("")}</tr>`).join("")}</tbody>
+      <tfoot><tr><td></td><td class="l"><b>TOTAL</b></td><td></td>${columns.slice(3).map(c =>
+        `<td><b>${fmt(data.total[c], kinds[c] || "number")}</b></td>`).join("")}</tr></tfoot>
+    </table></div>`);
+};
+
+views.teams = async () => {
+  const [{ teams }, { reps }] = await Promise.all([api("/teams"), api("/reps")]);
+  state.cache.teams = teams;
+  const count = (id) => reps.filter(r => r.team_id === id).length;
+  const editable = state.me.editable_team_ids;
+  const mayEdit = (id) => editable === null || (editable || []).includes(id);
+
+  section("Teams", "The platform owns team structure. A source refresh never changes it.", `
+    ${can("branch_manager") ? `<div class="card"><h3>New team</h3><div class="row">
+      <div><label>Name</label><input id="t-name"></div>
+      <div><label>Lead</label><input id="t-lead"></div>
+      <div><label>Role</label><select id="t-role">
+        <option>Sales Manager</option><option>SMIT</option><option>General Manager</option><option>Other</option>
+      </select></div>
+      <div class="fixed"><button class="primary" id="t-add">Create</button></div>
+    </div></div>` : ""}
+    <div class="card"><table>
+      <thead><tr><th>Team</th><th class="l">Lead</th><th>Members</th><th></th></tr></thead>
+      <tbody>${teams.map(t => `<tr>
+        <td class="l"><b>${esc(t.name)}</b></td>
+        <td class="l">${esc(t.lead_name) || "<span class=pill>none</span>"} ${t.lead_name ? `<span class=pill>${esc(t.lead_role)}</span>` : ""}</td>
+        <td>${count(t.id)}</td>
+        <td>${mayEdit(t.id) ? `<button class="sm" data-edit="${t.id}">Edit</button>` : ""}
+            ${can("org_admin") ? `<button class="sm danger" data-del="${t.id}">Delete</button>` : ""}</td>
+      </tr>`).join("")}</tbody>
+    </table></div>`);
+
+  if (can("branch_manager")) $("t-add").onclick = () => guard(async () => {
+    await api("/teams", { method: "POST", body: JSON.stringify({
+      name: $("t-name").value.trim(), lead_name: $("t-lead").value.trim(), lead_role: $("t-role").value }) });
+    toast("Team created", "good"); render();
+  });
+
+  onClick("[data-edit]", node => guard(async () => {
+    const team = teams.find(t => t.id === Number(node.dataset.edit));
+    const name = prompt("Team name", team.name); if (name === null) return;
+    const lead = prompt("Team lead", team.lead_name); if (lead === null) return;
+    await api(`/teams/${team.id}`, { method: "PATCH", body: JSON.stringify({
+      name, lead_name: lead, lead_role: team.lead_role, branch_id: team.branch_id }) });
+    toast("Saved", "good"); render();
+  }));
+
+  onClick("[data-del]", node => guard(async () => {
+    const id = Number(node.dataset.del);
+    const members = reps.filter(r => r.team_id === id);
+    const reassign = {};
+    for (const member of members) {
+      const options = teams.filter(t => t.id !== id).map(t => `${t.id}=${t.name}`).join(", ");
+      const answer = prompt(`Move ${member.name} to which team id?\n${options}\n(blank = Unassigned)`, "");
+      if (answer === null) return;
+      reassign[member.id] = answer.trim() ? Number(answer.trim()) : null;
+    }
+    await api(`/teams/${id}/delete`, { method: "POST", body: JSON.stringify({ reassign }) });
+    toast("Team deleted", "good"); render();
+  }));
+};
+
+views.people = async () => {
+  const [{ reps }, { teams }] = await Promise.all([api("/reps"), api("/teams")]);
+  section("People", "A local assignment outranks whatever the source reports, and survives every refresh.", `
+    <div class="card"><table>
+      <thead><tr><th class="l">Name</th><th class="l">Showing as</th><th class="l">Source says</th><th class="l">Title</th><th></th></tr></thead>
+      <tbody>${reps.map(r => `<tr>
+        <td class="l"><b>${esc(r.name)}</b></td>
+        <td class="l">${esc(r.team)} ${r.assigned_locally ? '<span class="pill on">local</span>' : '<span class="pill">from source</span>'}</td>
+        <td class="l">${esc(r.source_team) || "&mdash;"}</td>
+        <td class="l">${esc(r.title) || "&mdash;"}</td>
+        <td>${can("branch_manager") ? `<select data-assign="${r.id}" style="width:auto">
+          <option value="">— use source —</option>
+          ${teams.map(t => `<option value="${t.id}" ${t.id === r.team_id ? "selected" : ""}>${esc(t.name)}</option>`).join("")}
+        </select>` : ""}</td>
+      </tr>`).join("")}</tbody>
+    </table></div>`);
+
+  $("view").querySelectorAll("[data-assign]").forEach(select => {
+    select.onchange = () => guard(async () => {
+      await api(`/reps/${select.dataset.assign}/team`, { method: "POST",
+        body: JSON.stringify({ team_id: select.value ? Number(select.value) : null }) });
+      toast("Assignment saved", "good"); render();
+    });
+  });
+};
+
+views.theme = async () => {
+  const [catalogue, { themes }, { teams }] = await Promise.all([
+    api("/themes/catalogue"), api("/themes"), api("/teams")]);
+  const editable = state.me.editable_team_ids;
+  const targets = [
+    ...(can("org_admin") ? [{ value: "org", label: "Whole organization" }] : []),
+    ...teams.filter(t => editable === null || (editable || []).includes(t.id))
+            .map(t => ({ value: "team:" + t.id, label: t.name })),
+  ];
+  if (!targets.length) return section("Theme", "You have no team to style.", "");
+
+  const tokens = { ...catalogue.defaults };
+  section("Theme", "Colours, a logo and a font. Never CSS &mdash; and a theme that would be unreadable is refused, not saved with a warning.", `
+    <div class="card">
+      <div class="row">
+        <div><label>Applies to</label><select id="th-target">${targets.map(t =>
+          `<option value="${t.value}">${esc(t.label)}</option>`).join("")}</select></div>
+        <div><label>Name</label><input id="th-name" value="Brand"></div>
+        <div><label>Font</label><select id="th-font">${catalogue.fonts.map(f =>
+          `<option value="${f.key}">${f.key}</option>`).join("")}</select></div>
+      </div>
+      <div class="swatchgrid" style="margin-top:1rem">${catalogue.color_tokens.map(key =>
+        `<div><label>${key}</label><input type="color" data-tok="${key}" value="${tokens[key]}"></div>`).join("")}</div>
+      <div class="row" style="margin-top:1rem">
+        <div><label>Logo URL (optional)</label><input data-tok="logo_url" placeholder="https://…"></div>
+        <div class="fixed"><button class="primary" id="th-save">Save theme</button></div>
+      </div>
+    </div>
+    <div class="card"><h3>Readability</h3><div id="th-ratios"></div>
+      <div class="preview" id="th-prev"></div></div>`);
+
+  const readTokens = () => {
+    const values = { font: $("th-font").value };
+    $("view").querySelectorAll("[data-tok]").forEach(input => {
+      if (input.value) values[input.dataset.tok] = input.value;
+    });
+    return values;
+  };
+
+  const refresh = () => guard(async () => {
+    const current = readTokens();
+    const report = await api("/themes/preview", { method: "POST", body: JSON.stringify({ tokens: current }) });
+    const minimums = { text_on_background: catalogue.minimums.text, text_on_surface: catalogue.minimums.text,
+                       muted_on_background: catalogue.minimums.secondary, accent_on_surface: catalogue.minimums.accent };
+    $("th-ratios").innerHTML = Object.entries(report.ratios).map(([key, ratio]) => {
+      const ok = ratio >= minimums[key];
+      return `<div class="ratio"><span>${key.replace(/_/g, " ")}</span>
+        <b class="${ok ? "ok" : "no"}">${ratio.toFixed(2)}:1 ${ok ? "✓" : "needs " + minimums[key].toFixed(2)}</b></div>`;
+    }).join("") + (report.problems.length
+      ? `<div style="color:#ff9a92;margin-top:.6rem">${report.problems.map(p => esc(p.message)).join("<br>")}</div>`
+      : `<div style="color:#7ee2a8;margin-top:.6rem">Readable across a room.</div>`);
+
+    const r = report.resolved;
+    $("th-prev").style.cssText =
+      `background:${r.background};color:${r.text};font-family:${report.font_stack}`;
+    $("th-prev").innerHTML =
+      `<div style="font-size:26px;font-weight:800">SALES LEADERBOARD</div>
+       <div style="color:${r.muted};letter-spacing:.1em;font-size:12px">SECONDARY TEXT</div>
+       <div style="background:${r.surface};border-top:4px solid ${r.primary};padding:.7rem;margin-top:.7rem;border-radius:6px">
+         <span style="color:${r.accent};font-weight:800;font-size:22px">$412,900</span>
+         <span style="color:${r.muted}"> &nbsp;NET SPLIT</span></div>`;
+  });
+
+  $("view").querySelectorAll("[data-tok], #th-font").forEach(input => input.oninput = refresh);
+  $("th-target").onchange = () => {
+    const target = $("th-target").value;
+    const found = target === "org"
+      ? themes.find(t => t.scope === "org")
+      : themes.find(t => t.scope === "team" && t.team_id === Number(target.split(":")[1]));
+    const merged = { ...catalogue.defaults, ...(found?.tokens || {}) };
+    $("th-name").value = found?.name || "Brand";
+    $("th-font").value = merged.font || "inter";
+    $("view").querySelectorAll("[data-tok]").forEach(i => { if (merged[i.dataset.tok]) i.value = merged[i.dataset.tok]; });
+    refresh();
+  };
+  $("th-target").onchange();
+
+  $("th-save").onclick = () => guard(async () => {
+    const target = $("th-target").value;
+    const path = target === "org" ? "/themes/org" : `/themes/team/${target.split(":")[1]}`;
+    await api(path, { method: "PUT", body: JSON.stringify({ name: $("th-name").value, tokens: readTokens() }) });
+    toast("Theme saved", "good");
+  });
+};
+
+views.screens = async () => {
+  const [{ screens }, charts, { teams }] = await Promise.all([
+    api("/screens"), api("/charts/catalogue"), api("/teams")]);
+  state.cache.charts = charts;
+  const modes = ["whole_office", "per_team", "team_vs_team", "all_teams"];
+
+  section("Screens", "What a television shows. Preview here before anyone sees it on a wall.", `
+    ${can("branch_manager") ? `<div class="card"><h3>New screen</h3>
+      <div class="row">
+        <div><label>Name</label><input id="s-name" placeholder="Front office TV"></div>
+        <div><label>Mode</label><select id="s-mode">${modes.map(m => `<option>${m}</option>`).join("")}</select></div>
+        <div><label>Title on screen</label><input id="s-title" value="SALES LEADERBOARD"></div>
+        <div><label>Rank by</label><select id="s-rank">${charts.metrics.map(m =>
+          `<option value="${m.key}" ${m.key === "net_split" ? "selected" : ""}>${esc(m.label)}</option>`).join("")}</select></div>
+      </div>
+      <div id="s-teams" class="row" style="margin-top:.7rem" hidden></div>
+      <h3 style="margin-top:1.1rem">Widgets</h3>
+      <div id="s-widgets"></div>
+      <div class="row" style="margin-top:.6rem">
+        <div class="fixed"><button id="s-addw">Add widget</button></div>
+        <div class="fixed"><button class="primary" id="s-create">Create screen</button></div>
+      </div></div>` : ""}
+    <div class="card"><table>
+      <thead><tr><th class="l">Screen</th><th class="l">Mode</th><th>Widgets</th><th></th></tr></thead>
+      <tbody>${screens.map(s => `<tr>
+        <td class="l"><b>${esc(s.name)}</b></td><td class="l">${esc(s.mode)}</td>
+        <td>${(s.config.widgets || []).length}</td>
+        <td><button class="sm" data-prev="${s.id}">Preview</button>
+            ${can("branch_manager") ? `<button class="sm danger" data-delscreen="${s.id}">Delete</button>` : ""}</td>
+      </tr>`).join("") || `<tr><td class="l" colspan="4">No screens yet.</td></tr>`}</tbody>
+    </table></div>
+    <div id="s-preview"></div>`);
+
+  if (can("branch_manager")) {
+    const widgetRow = () => {
+      const row = document.createElement("div");
+      row.className = "widgetrow";
+      row.innerHTML = `
+        <div><label>Chart</label><select class="w-type">${charts.charts.map(c =>
+          `<option value="${c.key}">${esc(c.label)}</option>`).join("")}</select></div>
+        <div><label>Metric</label><select class="w-metric">${charts.metrics.map(m =>
+          `<option value="${m.key}">${esc(m.label)}</option>`).join("")}</select></div>
+        <div><label>Group by</label><select class="w-group"><option value="team">Team</option><option value="rep">Rep</option></select></div>
+        <div><label>Target</label><input class="w-target" type="number" placeholder="—"></div>
+        <div class="fixed"><button class="sm danger w-del">✕</button></div>`;
+      row.querySelector(".w-del").onclick = () => row.remove();
+      return row;
+    };
+    $("s-addw").onclick = () => $("s-widgets").appendChild(widgetRow());
+    $("s-widgets").appendChild(widgetRow());
+
+    const teamPicker = () => {
+      const mode = $("s-mode").value;
+      const box = $("s-teams");
+      box.hidden = !(mode === "per_team" || mode === "team_vs_team");
+      box.innerHTML = mode === "per_team"
+        ? `<div><label>Team</label><select id="s-team">${teams.map(t => `<option>${esc(t.name)}</option>`).join("")}</select></div>`
+        : mode === "team_vs_team"
+        ? `<div><label>Team 1</label><select id="s-t1">${teams.map(t => `<option>${esc(t.name)}</option>`).join("")}</select></div>
+           <div><label>Team 2</label><select id="s-t2">${teams.map(t => `<option>${esc(t.name)}</option>`).join("")}</select></div>`
+        : "";
+    };
+    $("s-mode").onchange = teamPicker; teamPicker();
+
+    $("s-create").onclick = () => guard(async () => {
+      const widgets = [...$("s-widgets").children].map(row => {
+        const widget = {
+          type: row.querySelector(".w-type").value,
+          metric: row.querySelector(".w-metric").value,
+          group_by: row.querySelector(".w-group").value,
+        };
+        const target = row.querySelector(".w-target").value;
+        if (target) widget.target = Number(target);
+        return widget;
+      });
+      const mode = $("s-mode").value;
+      const config = { title: $("s-title").value, rank_by: $("s-rank").value, widgets };
+      if (mode === "per_team") config.team = $("s-team").value;
+      if (mode === "team_vs_team") config.teams = [$("s-t1").value, $("s-t2").value];
+      await api("/screens", { method: "POST", body: JSON.stringify({ name: $("s-name").value.trim(), mode, config }) });
+      toast("Screen created", "good"); render();
+    });
+  }
+
+  onClick("[data-prev]", node => guard(async () => {
+    const data = await api(`/screens/${node.dataset.prev}/render`);
+    $("s-preview").innerHTML = `<div class="card"><h3>Preview: ${esc(data.screen.title)}</h3>
+      <div class="grid3">${(data.widgets || []).map(w => `<div class="card" style="background:var(--panel2)">
+        <label>${esc(w.label)}</label>
+        <div style="font-size:20px;font-weight:800;color:var(--accent)">${
+          w.type === "big_number" || w.type === "gauge" ? fmt(w.value, w.unit)
+          : w.type === "trend" ? (w.points.length + " days")
+          : (w.series || []).map(s => `${esc(s.label)} ${fmt(s.value, w.unit)}`).join("<br>")}</div>
+      </div>`).join("") || "<div class='hint'>No widgets on this screen.</div>"}</div>
+      ${data.widget_errors.length ? `<div style="color:#ff9a92;margin-top:.7rem">${
+        data.widget_errors.map(e => esc(e.error)).join("<br>")}</div>` : ""}
+      <div class="hint" style="margin-top:.8rem">${data.rep_count} reps &middot; theme font ${esc(data.theme.font)}</div></div>`;
+  }));
+
+  onClick("[data-delscreen]", node => guard(async () => {
+    if (!confirm("Delete this screen?")) return;
+    await api(`/screens/${node.dataset.delscreen}/delete`, { method: "POST" });
+    toast("Screen deleted", "good"); render();
+  }));
+};
+
+views.displays = async () => {
+  const [{ displays }, { screens }] = await Promise.all([api("/display-tokens"), api("/screens")]);
+  section("Displays", "A television cannot sign in, so it carries a long link instead. Revoking it cuts the screen off.", `
+    <div class="card"><h3>New display</h3><div class="row">
+      <div><label>Name</label><input id="d-name" placeholder="Front office TV"></div>
+      <div class="fixed"><button class="primary" id="d-add">Create link</button></div>
+    </div></div>
+    <div class="card"><table>
+      <thead><tr><th class="l">Display</th><th class="l">Showing</th><th class="l">Last seen</th><th></th></tr></thead>
+      <tbody>${displays.map(d => `<tr>
+        <td class="l"><b>${esc(d.name)}</b> <code>${esc(d.prefix)}…</code></td>
+        <td class="l"><select data-attach="${d.id}" style="width:auto">
+          <option value="">— whole office —</option>
+          ${screens.map(s => `<option value="${s.id}" ${s.id === d.screen_id ? "selected" : ""}>${esc(s.name)}</option>`).join("")}
+        </select></td>
+        <td class="l">${d.last_seen_at ? esc(d.last_seen_at.slice(0, 16).replace("T", " ")) : "never"}</td>
+        <td>${d.revoked ? '<span class="pill off">revoked</span>'
+             : `<button class="sm danger" data-revoke="${d.id}">Revoke</button>`}</td>
+      </tr>`).join("") || `<tr><td class="l" colspan="4">No displays yet.</td></tr>`}</tbody>
+    </table></div>`);
+
+  $("d-add").onclick = () => guard(async () => {
+    const created = await api("/display-tokens", { method: "POST",
+      body: JSON.stringify({ name: $("d-name").value.trim() || "Television" }) });
+    const url = location.origin + "/tv/" + created.token;
+    // Shown once. Making it selectable beats a toast that vanishes.
+    $("view").insertAdjacentHTML("afterbegin",
+      `<div class="card" style="border-color:var(--good)">
+         <h3>Open this on the television</h3>
+         <code>${esc(url)}</code>
+         <div class="hint" style="margin-top:.5rem">Shown only now &mdash; the link is stored hashed.</div>
+       </div>`);
+    toast("Display created", "good");
+  });
+
+  $("view").querySelectorAll("[data-attach]").forEach(select => select.onchange = () => guard(async () => {
+    await api(`/display-tokens/${select.dataset.attach}/screen`, { method: "POST",
+      body: JSON.stringify({ screen_id: select.value ? Number(select.value) : null }) });
+    toast("Display updated", "good");
+  }));
+
+  onClick("[data-revoke]", node => guard(async () => {
+    if (!confirm("Revoke this link? The television will stop working immediately.")) return;
+    await api(`/display-tokens/${node.dataset.revoke}/revoke`, { method: "POST" });
+    toast("Revoked", "good"); render();
+  }));
+};
+
+views.data = async () => {
+  const [{ sources, available }, { keys }] = await Promise.all([api("/sources"), api("/api-keys")]);
+  section("Data", "Pull from a system we can reach, or let the customer push to us. Credentials are encrypted and never returned.", `
+    <div class="card"><h3>Add a source</h3><div class="row">
+      <div><label>Kind</label><select id="src-kind">${available.map(c =>
+        `<option value="${c.kind}">${esc(c.label)}${c.pullable ? "" : " (push)"}</option>`).join("")}</select></div>
+      <div><label>Name</label><input id="src-name" placeholder="Tableau — Rep Totals"></div>
+      <div><label>Secret (PAT)</label><input id="src-secret" type="password" placeholder="only for pull sources"></div>
+      <div class="fixed"><button class="primary" id="src-add">Add</button></div>
+    </div>
+    <div style="margin-top:.7rem"><label>Config (JSON)</label>
+      <textarea id="src-config" rows="4" placeholder='{"server":"https://…","site":"…","pat_name":"…","workbook":"…","view":"…"}'></textarea></div>
+    </div>
+    <div class="card"><table>
+      <thead><tr><th class="l">Source</th><th class="l">Kind</th><th class="l">Last run</th><th class="l">Status</th><th></th></tr></thead>
+      <tbody>${sources.map(s => `<tr>
+        <td class="l"><b>${esc(s.name)}</b> ${s.has_secret ? '<span class="pill on">secret set</span>' : ""}</td>
+        <td class="l">${esc(s.kind)}</td>
+        <td class="l">${s.last_run_at ? esc(s.last_run_at.slice(0, 16).replace("T", " ")) : "never"}</td>
+        <td class="l">${esc(s.last_status)}</td>
+        <td><button class="sm" data-test="${s.id}">Test</button>
+            <button class="sm" data-refresh="${s.id}">Refresh</button>
+            <button class="sm danger" data-delsrc="${s.id}">Delete</button></td>
+      </tr>`).join("") || `<tr><td class="l" colspan="5">No sources yet.</td></tr>`}</tbody>
+    </table></div>
+    <div class="card"><h3>Ingest API keys</h3>
+      <div class="row"><div><label>Name</label><input id="k-name" placeholder="Customer IT push"></div>
+        <div class="fixed"><button class="primary" id="k-add">Create key</button></div></div>
+      <table style="margin-top:.8rem">
+        <thead><tr><th class="l">Key</th><th class="l">Last used</th><th></th></tr></thead>
+        <tbody>${keys.map(k => `<tr>
+          <td class="l"><b>${esc(k.name)}</b> <code>${esc(k.prefix)}…</code></td>
+          <td class="l">${k.last_used_at ? esc(k.last_used_at.slice(0, 16).replace("T", " ")) : "never"}</td>
+          <td>${k.revoked ? '<span class="pill off">revoked</span>'
+               : `<button class="sm danger" data-krevoke="${k.id}">Revoke</button>`}</td>
+        </tr>`).join("") || `<tr><td class="l" colspan="3">No keys yet.</td></tr>`}</tbody>
+      </table></div>`);
+
+  $("src-add").onclick = () => guard(async () => {
+    let config = {};
+    const raw = $("src-config").value.trim();
+    if (raw) {
+      try { config = JSON.parse(raw); }
+      catch { throw new Error("Config is not valid JSON."); }
+    }
+    await api("/sources", { method: "POST", body: JSON.stringify({
+      kind: $("src-kind").value, name: $("src-name").value.trim() || "Source",
+      config, secret: $("src-secret").value }) });
+    toast("Source added", "good"); render();
+  });
+
+  onClick("[data-test]", node => guard(async () => {
+    const result = await api(`/sources/${node.dataset.test}/test`, { method: "POST" });
+    toast(result.message, result.ok ? "good" : "bad");
+  }));
+
+  onClick("[data-refresh]", node => guard(async () => {
+    const result = await api(`/sources/${node.dataset.refresh}/refresh`, { method: "POST" });
+    toast(`Loaded ${result.reps_seen} reps (${result.reps_created} new)`, "good"); render();
+  }));
+
+  onClick("[data-delsrc]", node => guard(async () => {
+    if (!confirm("Delete this source and its stored credential?
+Numbers it already loaded stay on the board.")) return;
+    await api(`/sources/${node.dataset.delsrc}/delete`, { method: "POST" });
+    toast("Source deleted", "good"); render();
+  }));
+
+  $("k-add").onclick = () => guard(async () => {
+    const created = await api("/api-keys", { method: "POST",
+      body: JSON.stringify({ name: $("k-name").value.trim() || "Ingest key" }) });
+    $("view").insertAdjacentHTML("afterbegin",
+      `<div class="card" style="border-color:var(--good)"><h3>Copy this key now</h3>
+        <code>${esc(created.token)}</code>
+        <div class="hint" style="margin-top:.5rem">Stored hashed &mdash; it cannot be shown again.</div></div>`);
+    toast("Key created", "good");
+  });
+
+  onClick("[data-krevoke]", node => guard(async () => {
+    if (!confirm("Revoke this key? Anything pushing with it stops immediately.")) return;
+    await api(`/api-keys/${node.dataset.krevoke}/revoke`, { method: "POST" });
+    toast("Revoked", "good"); render();
+  }));
+};
+
+views.audit = async () => {
+  const { entries } = await api("/audit?limit=200");
+  section("Audit", "Who changed what. Written as it happens, because it cannot be reconstructed later.", `
+    <div class="card"><table>
+      <thead><tr><th class="l">When</th><th class="l">Action</th><th class="l">Target</th><th class="l">By</th></tr></thead>
+      <tbody>${entries.map(e => `<tr>
+        <td class="l">${esc(e.at.slice(0, 19).replace("T", " "))}</td>
+        <td class="l"><code>${esc(e.action)}</code></td>
+        <td class="l">${esc(e.target)}</td>
+        <td class="l">${esc(e.actor)}</td>
+      </tr>`).join("") || `<tr><td class="l" colspan="4">Nothing recorded yet.</td></tr>`}</tbody>
+    </table></div>`);
+};
+
+// ---------------------------------------------------------------- boot
+async function render() {
+  $("view").innerHTML = `<div class="hint">Loading…</div>`;
+  try { await views[state.tab](); }
+  catch (error) { section("Error", "", `<div class="card" style="color:#ff9a92">${esc(error.message)}</div>`); }
+}
+
+$("li-go").onclick = signIn;
+$("li-pass").onkeydown = (e) => { if (e.key === "Enter") signIn(); };
+$("logout").onclick = () => guard(async () => { await api("/auth/logout", { method: "POST" }); signOut(); });
+
+if (state.token) start(); else { $("login").hidden = false; }
+</script>
+</body>
+</html>

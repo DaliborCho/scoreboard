@@ -42,8 +42,13 @@ current on every start.
 The seed prints an ingest API key and a display URL once. They are stored as
 hashes and cannot be read again — the same rule a real customer will get.
 
-- `http://localhost:8000/health`
+- `http://localhost:8000/console` — sign in to manage teams, themes and screens
+- `http://localhost:8000/tv/<token>` — what a television opens
 - `http://localhost:8000/docs` — interactive API reference
+- `http://localhost:8000/health`
+
+A worker process refreshes pull sources on their own interval:
+`docker compose logs -f worker`.
 
 Behind TLS-inspecting antivirus or a corporate proxy, the Docker build cannot
 verify certificates. See `backend/certs/README.md`.
@@ -68,10 +73,13 @@ backend/src/scoreboard/
   models.py        multi-tenant schema
   tenancy.py       TenantScope - the single chokepoint for org isolation
   security.py      password hashing, opaque tokens, secret encryption
-  domain/          metric and leaderboard rules; no database, no framework
+  domain/          metric, leaderboard, theme and chart rules — no database,
+                   no framework, so every rule is directly testable
   connectors/      one module per source system, behind a single interface
-  services/        refresh and read paths
+  services/        refresh, read, scheduling and screen assembly
   api/             routes, split by credential type
+  web/             the two pages a person opens: tv.html and console.html
+  worker.py        background refresh loop, its own process
 ```
 
 ## Getting data in
@@ -134,13 +142,44 @@ everyone else's.
 `tests/test_auth.py` fails if a mutating endpoint is added without a
 credential dependency — the mistake that actually happens.
 
+## Themes
+
+Colours, a logo and a font from a curated set. Never CSS.
+
+A theme that would be unreadable is **refused on save**, not saved with a
+warning. A television runs unattended for months in a room where nobody can
+fix it, so this has to be a rule rather than advice. Text is held to 7:1
+contrast rather than the web minimum of 4.5:1, because a board is read across
+a room.
+
+Themes inherit: organization brand, then a team's own overrides on top. A team
+lead may restyle their own team and no other. Multi-team views carry each
+team's palette on its own card, while the whole-office board wears the
+organization's, so no single team's brand takes over a screen that belongs to
+everybody.
+
+## Charts
+
+Six types: big number, bar, donut, trend, gauge and leader list. The list is
+short on purpose — "any chart you like" produces boards nobody can read from
+the far side of a sales floor.
+
+Every value is computed on the server through the same roll-up the tables use,
+so a chart cannot disagree with the numbers beside it. A donut refuses a rate,
+because a slice has to be a share of a whole. When a donut is trimmed to the
+top few, the remainder appears as *Other* rather than being dropped.
+
 ## Status
 
-Working: multi-tenant schema and isolation, Alembic migrations, user accounts
-with revocable sessions and role-scoped permissions, the console API (teams,
-assignments, credentials, sources, audit log), the four display modes, metric
-rules, the Tableau and push connectors, and daily metric history.
+Working: multi-tenant schema and isolation, Alembic migrations, accounts with
+revocable sessions and role-scoped permissions, the full console API, the
+console and television front ends, four display modes, themes with enforced
+contrast, six chart types, the Tableau and push connectors, daily metric
+history, and a background worker that refreshes sources on their interval.
 
-Not built yet: the console front end, the theme editor, charts and the
-dashboard builder, scheduled refresh, object storage for logos, and password
-reset / invitations.
+Not built yet: object storage for uploaded logos (a logo is a URL for now),
+invitations and password reset, per-screen rotation, and billing.
+
+Known rough edges: widgets on a head-to-head board still show office-wide
+figures rather than the two selected teams; the console edits teams through
+browser prompts rather than a proper dialog.

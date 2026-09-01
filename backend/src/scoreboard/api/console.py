@@ -665,3 +665,68 @@ def list_audit(
             for e in entries
         ]
     }
+
+class SourceUpdate(BaseModel):
+    name: str | None = None
+    config: dict | None = None
+    # Blank means "leave the stored credential alone". There is no way to read
+    # one back, so an edit form cannot round-trip it and must not clear it.
+    secret: str | None = None
+    is_enabled: bool | None = None
+    refresh_seconds: int | None = None
+
+
+@router.patch("/sources/{source_id}")
+def update_source(
+    source_id: int,
+    payload: SourceUpdate,
+    context: AuthContext = Depends(require_role(Role.org_admin)),
+    scope: TenantScope = Depends(user_scope),
+) -> dict:
+    source = scope.get(DataSource, source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Source not found.")
+
+    if payload.name is not None:
+        source.name = payload.name
+    if payload.config is not None:
+        source.config = payload.config
+    if payload.is_enabled is not None:
+        source.is_enabled = payload.is_enabled
+    if payload.refresh_seconds is not None:
+        source.refresh_seconds = max(payload.refresh_seconds, 60)
+    if payload.secret:
+        source.secret_encrypted = encrypt_secret(payload.secret)
+
+    audit.record(
+        scope, "source.update", actor_user_id=context.user.id,
+        actor_label=context.user.email, target=source.name,
+        detail={"secret_replaced": bool(payload.secret)},
+    )
+    scope.commit()
+    return _source_json(source)
+
+
+@router.post("/sources/{source_id}/delete")
+def delete_source(
+    source_id: int,
+    context: AuthContext = Depends(require_role(Role.org_admin)),
+    scope: TenantScope = Depends(user_scope),
+) -> dict:
+    """Remove a source and its stored credential.
+
+    The numbers it already loaded stay. Deleting a connection should not wipe
+    a month of a customer's leaderboard.
+    """
+    source = scope.get(DataSource, source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Source not found.")
+
+    audit.record(
+        scope, "source.delete", actor_user_id=context.user.id,
+        actor_label=context.user.email, target=source.name,
+        detail={"kind": source.kind},
+    )
+    scope.delete(source)
+    scope.commit()
+    return {"ok": True}

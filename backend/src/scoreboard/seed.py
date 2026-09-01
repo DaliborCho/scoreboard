@@ -33,6 +33,8 @@ from scoreboard.tenancy import TenantScope
 SLUG = "demo"
 OWNER_EMAIL = "owner@demo-company.com"
 OWNER_PASSWORD = "demo-password-change-me"
+API_KEY_NAME = "Demo ingest key"
+DISPLAY_NAME = "Front office TV"
 TEAMS = ["Team Alpha", "Team Bravo", "Team Charlie", "Undisputed"]
 
 
@@ -78,18 +80,30 @@ def main() -> int:
         f"{result.reps_seen} reps ({result.reps_created} new)"
     )
 
-    api_token, api_prefix, api_hash = generate_token("sb")
-    scope.add(ApiKey(name="Demo ingest key", prefix=api_prefix, token_hash=api_hash))
-
-    tv_token, tv_prefix, tv_hash = generate_token("tv")
-    scope.add(DisplayToken(name="Front office TV", prefix=tv_prefix, token_hash=tv_hash))
+    # Credentials are created once. Re-running the seed must not litter the
+    # organization with a fresh key and another television on every pass, and
+    # the existing ones genuinely cannot be shown again.
+    api_token = tv_token = ""
+    if scope.one_by(ApiKey, name=API_KEY_NAME) is None:
+        api_token, prefix, hashed = generate_token("sb")
+        scope.add(ApiKey(name=API_KEY_NAME, prefix=prefix, token_hash=hashed))
+    if scope.one_by(DisplayToken, name=DISPLAY_NAME) is None:
+        tv_token, prefix, hashed = generate_token("tv")
+        scope.add(DisplayToken(name=DISPLAY_NAME, prefix=prefix, token_hash=hashed))
     scope.commit()
 
     print("\n" + "=" * 72)
-    print("Shown once. Store them now.\n")
     print(f"  Console sign-in  {OWNER_EMAIL} / {OWNER_PASSWORD}")
-    print(f"  Ingest API key   {api_token}")
-    print(f"  Display URL      http://localhost:8000/api/v1/display/{tv_token}/board")
+    print(f"  Console          http://localhost:8000/console")
+    if api_token:
+        print(f"  Ingest API key   {api_token}")
+    else:
+        print(f"  Ingest API key   '{API_KEY_NAME}' already exists, stored hashed.")
+    if tv_token:
+        print(f"  Display URL      http://localhost:8000/tv/{tv_token}")
+    else:
+        print(f"  Display          '{DISPLAY_NAME}' already exists, stored hashed.")
+    print("\n  Tokens are shown only on the pass that creates them.")
     print("=" * 72)
     return 0
 

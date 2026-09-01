@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from scoreboard import __version__
-from scoreboard.api import console, routes
+from scoreboard.api import console, pages, presentation, routes
 
 
 @asynccontextmanager
@@ -37,6 +37,8 @@ def create_app() -> FastAPI:
     app.include_router(routes.ingest)
     app.include_router(routes.display)
     app.include_router(console.router)
+    app.include_router(presentation.router)
+    app.include_router(pages.router)
     return app
 
 

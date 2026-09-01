@@ -169,3 +169,27 @@ def board_trend(
     scope, _ = scoped
     period = _period(period_start, period_end)
     return {"metric": metric, "points": trend(scope, period, metric)}
+
+
+@display.get("/{token}/screen")
+def display_screen(
+    period_start: date | None = None,
+    period_end: date | None = None,
+    scoped=Depends(display_scope),
+) -> dict:
+    """Everything a television needs, in one request.
+
+    A screen that has not been attached to a display falls back to the whole
+    office board, so a newly created display link shows something real rather
+    than an error nobody is present to read.
+    """
+    from scoreboard.models import Screen
+    from scoreboard.services.screens import render
+
+    scope, display_token = scoped
+    screen = scope.get(Screen, display_token.screen_id) if display_token.screen_id else None
+    period = _period(period_start, period_end)
+
+    payload = render(scope, screen, period=period)
+    payload["display"] = {"name": display_token.name}
+    return payload

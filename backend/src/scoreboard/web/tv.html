@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Scoreboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;600;800&family=Oswald:wght@500;600&family=Roboto:wght@400;700&family=Source+Sans+3:wght@400;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+/* A television is read across a room and nobody is standing beside it, so the
+   page never scrolls: it scales to fit and reports its own failures. */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+body {
+  background: var(--background, #0b1020);
+  color: var(--text, #f6f8ff);
+  font-family: var(--font-stack, Inter, system-ui, sans-serif);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+#stage { height: 100vh; display: flex; flex-direction: column; padding: 1.6vh 1.8vw; gap: 1.4vh; }
+
+header { display: flex; align-items: baseline; justify-content: space-between; gap: 2vw; flex: none; }
+h1 { font-size: clamp(22px, 3.4vw, 64px); font-weight: 700; letter-spacing: .02em; line-height: 1; }
+.sub { color: var(--muted, #9aa7c7); font-size: clamp(12px, 1.2vw, 22px); letter-spacing: .08em; text-transform: uppercase; }
+.meta { text-align: right; color: var(--muted); font-size: clamp(11px, 1vw, 18px); line-height: 1.5; }
+.logo { max-height: 6vh; max-width: 16vw; object-fit: contain; }
+
+#body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 1.2vh; }
+/* Bounded on purpose. Widgets are the garnish; the board is the meal, and
+   an unconstrained grid row will happily eat half a television. */
+#widgets { flex: 0 0 24vh; display: grid; gap: .9vw; grid-auto-flow: column;
+           grid-auto-columns: minmax(0, 1fr); min-height: 0; }
+#widgets .card { overflow: hidden; }
+#main { flex: 1; min-height: 0; }
+
+.card {
+  background: var(--surface, #161d33);
+  border-radius: .8vw;
+  padding: 1.1vh 1vw;
+  display: flex; flex-direction: column; gap: .5vh;
+  min-width: 0;
+}
+.card h3 {
+  font-size: clamp(9px, .82vw, 15px); font-weight: 600; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--muted); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.bignum { font-size: clamp(20px, 3.1vw, 58px); font-weight: 800; line-height: 1; color: var(--accent, #f5a524); }
+
+table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+th, td { padding: .55vh .5vw; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+th:nth-child(1), td:nth-child(1) { width: 3.2vw; text-align: center; }
+th.name, td.name { text-align: left; }
+th {
+  font-size: clamp(9px, .82vw, 15px); font-weight: 600; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--muted);
+  border-bottom: 2px solid var(--primary, #3b6cf6);
+}
+tbody td { font-size: clamp(11px, 1.15vw, 24px); border-bottom: 1px solid rgba(255,255,255,.06); }
+tbody tr:nth-child(odd) { background: rgba(255,255,255,.028); }
+td.name { font-weight: 600; }
+.rankcell { font-weight: 800; color: var(--accent); }
+.rank1 td { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+tfoot td {
+  font-weight: 800; font-size: clamp(11px, 1.2vw, 25px);
+  border-top: 2px solid var(--primary); padding-top: .9vh; color: var(--accent);
+}
+.tracked { color: var(--accent); font-weight: 800; }
+
+.grid { display: grid; gap: 1vw; height: 100%; }
+.teamcard { background: var(--surface); border-radius: .8vw; padding: 1.2vh 1vw; display: flex; flex-direction: column; gap: .7vh; min-height: 0; }
+.teamcard .top { display: flex; align-items: center; justify-content: space-between; gap: .6vw; }
+.teamname { font-size: clamp(14px, 1.7vw, 34px); font-weight: 700; }
+.teamlead { color: var(--muted); font-size: clamp(9px, .85vw, 16px); letter-spacing: .08em; text-transform: uppercase; }
+.placement { font-size: clamp(10px, 1vw, 20px); font-weight: 800; letter-spacing: .14em; color: var(--accent); }
+/* Stretches to fill the card. A team panel with a void in the middle reads
+   as a rendering fault from across the room. */
+.kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5vh .8vw;
+        flex: 1; align-content: space-evenly; min-height: 0; }
+.kpi .k { font-size: clamp(8px, .72vw, 13px); letter-spacing: .1em; color: var(--muted); text-transform: uppercase; }
+.kpi .v { font-size: clamp(12px, 1.25vw, 26px); font-weight: 700; }
+.mvp { margin-top: auto; border-top: 1px solid rgba(255,255,255,.1); padding-top: .6vh; display: flex; justify-content: space-between; gap: .6vw; }
+.mvp .k { color: var(--accent); font-size: clamp(8px, .72vw, 13px); letter-spacing: .14em; }
+
+.bar-row { display: grid; grid-template-columns: 7.5vw 1fr auto; align-items: center; gap: .6vw; font-size: clamp(9px, .92vw, 17px); }
+.bar-row .lbl { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-track { background: rgba(255,255,255,.08); border-radius: 99px; height: 1.1vh; overflow: hidden; }
+.bar-fill { height: 100%; background: var(--primary); border-radius: 99px; }
+.bar-row .val { font-weight: 700; }
+
+.legend { display: flex; flex-wrap: wrap; gap: .3vh .7vw; font-size: clamp(8px, .75vw, 14px); color: var(--muted); }
+.legend i { display: inline-block; width: .7vw; height: .7vw; border-radius: 2px; margin-right: .25vw; vertical-align: middle; }
+
+#status {
+  position: fixed; left: 0; right: 0; bottom: 0;
+  background: #7f1d1d; color: #fff; padding: 1vh 2vw;
+  font-size: clamp(11px, 1.1vw, 20px); display: none;
+}
+#status.show { display: block; }
+.stale { color: #fbbf24; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <header>
+    <div>
+      <h1 id="title">Loading</h1>
+      <div class="sub" id="subtitle"></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:1.4vw">
+      <div class="meta" id="meta"></div>
+      <img id="logo" class="logo" alt="" hidden>
+    </div>
+  </header>
+  <div id="body">
+    <div id="widgets"></div>
+    <div id="main"></div>
+  </div>
+</div>
+<div id="status"></div>
+
+<script>
+"use strict";
+
+const TOKEN = location.pathname.split("/").filter(Boolean).pop();
+const ENDPOINT = `/api/v1/display/${encodeURIComponent(TOKEN)}/screen`;
+
+let refreshSeconds = 20;
+let consecutiveFailures = 0;
+let lastGood = null;
+
+const $ = (id) => document.getElementById(id);
+
+// ---------------------------------------------------------------- formatting
+function fmt(value, kind) {
+  const n = Number(value) || 0;
+  if (kind === "currency") {
+    const abs = Math.abs(n);
+    if (abs >= 1e6) return "$" + (n / 1e6).toFixed(abs >= 1e7 ? 1 : 2) + "M";
+    if (abs >= 1e4) return "$" + Math.round(n / 1e3) + "K";
+    return "$" + Math.round(n).toLocaleString("en-US");
+  }
+  if (kind === "percent") return n.toFixed(1) + "%";
+  if (kind === "number") return Math.round(n).toLocaleString("en-US");
+  return String(value ?? "");
+}
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+// ---------------------------------------------------------------- theme
+function applyTheme(theme) {
+  if (!theme) return;
+  const root = document.documentElement.style;
+  for (const key of ["background", "surface", "text", "muted", "primary", "accent"]) {
+    if (theme[key]) root.setProperty("--" + key, theme[key]);
+  }
+  root.setProperty("--font-stack", theme.font_stack || "Inter, system-ui, sans-serif");
+  document.body.style.backgroundImage = theme.background_image_url
+    ? `linear-gradient(rgba(0,0,0,.55),rgba(0,0,0,.55)), url("${theme.background_image_url}")`
+    : "none";
+  document.body.style.backgroundSize = "cover";
+  document.body.style.backgroundPosition = "center";
+
+  const logo = $("logo");
+  if (theme.logo_url) { logo.src = theme.logo_url; logo.hidden = false; }
+  else { logo.hidden = true; }
+}
+
+// ---------------------------------------------------------------- charts
+function palette(theme, index) {
+  const base = [theme.primary, theme.accent, "#22c55e", "#a855f7", "#06b6d4", "#f472b6", "#eab308", "#94a3b8"];
+  return base[index % base.length];
+}
+
+function donut(widget, theme) {
+  const size = 100, stroke = 20, radius = (size - stroke) / 2, circumference = 2 * Math.PI * radius;
+  const total = widget.series.reduce((sum, s) => sum + s.value, 0) || 1;
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", `0 0 ${size} ${size}`);
+  svg.style.cssText = "width:100%;height:100%;min-height:0;flex:1";
+
+  let offset = 0;
+  widget.series.forEach((slice, i) => {
+    const fraction = slice.value / total;
+    const arc = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    arc.setAttribute("cx", size / 2); arc.setAttribute("cy", size / 2); arc.setAttribute("r", radius);
+    arc.setAttribute("fill", "none");
+    arc.setAttribute("stroke", palette(theme, i));
+    arc.setAttribute("stroke-width", stroke);
+    arc.setAttribute("stroke-dasharray", `${fraction * circumference} ${circumference}`);
+    arc.setAttribute("stroke-dashoffset", -offset * circumference);
+    arc.setAttribute("transform", `rotate(-90 ${size / 2} ${size / 2})`);
+    svg.appendChild(arc);
+    offset += fraction;
+  });
+  return svg;
+}
+
+function trendChart(widget, theme) {
+  const points = widget.points || [];
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 100 40");
+  svg.setAttribute("preserveAspectRatio", "none");
+  svg.style.cssText = "width:100%;flex:1;min-height:0";
+  if (points.length < 2) {
+    // One capture is not a trend. Saying so beats drawing a flat line that
+    // looks like a stalled month.
+    const label = el("div", null, points.length ? "Collecting daily history" : "No history yet");
+    label.style.cssText = "color:var(--muted);font-size:clamp(9px,.85vw,16px);margin:auto";
+    return label;
+  }
+  const values = points.map(p => Number(p.value) || 0);
+  const min = Math.min(...values), max = Math.max(...values), span = (max - min) || 1;
+  const coords = values.map((v, i) => [i / (values.length - 1) * 100, 38 - ((v - min) / span) * 34]);
+
+  const area = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  area.setAttribute("d", `M0,40 ${coords.map(c => `L${c[0].toFixed(2)},${c[1].toFixed(2)}`).join(" ")} L100,40 Z`);
+  area.setAttribute("fill", theme.primary); area.setAttribute("opacity", ".18");
+  const line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+  line.setAttribute("points", coords.map(c => `${c[0].toFixed(2)},${c[1].toFixed(2)}`).join(" "));
+  line.setAttribute("fill", "none"); line.setAttribute("stroke", theme.accent);
+  line.setAttribute("stroke-width", "1.6"); line.setAttribute("vector-effect", "non-scaling-stroke");
+  svg.append(area, line);
+  return svg;
+}
+
+function gauge(widget, theme) {
+  const wrap = el("div");
+  wrap.style.cssText = "display:flex;flex-direction:column;gap:.6vh;flex:1;justify-content:center";
+  const ratio = widget.target > 0 ? Math.min(widget.value / widget.target, 1) : 0;
+  const value = el("div", "bignum", fmt(widget.value, widget.unit));
+  const track = el("div", "bar-track"); track.style.height = "1.6vh";
+  const fill = el("div", "bar-fill");
+  fill.style.width = (ratio * 100).toFixed(1) + "%";
+  fill.style.background = ratio >= 1 ? theme.accent : theme.primary;
+  track.appendChild(fill);
+  const caption = el("div", null,
+    widget.target > 0 ? `${(ratio * 100).toFixed(0)}% of ${fmt(widget.target, widget.unit)}` : "No target set");
+  caption.style.cssText = "color:var(--muted);font-size:clamp(9px,.8vw,15px)";
+  wrap.append(value, track, caption);
+  return wrap;
+}
+
+function barList(widget, theme) {
+  const wrap = el("div");
+  wrap.style.cssText = "display:flex;flex-direction:column;gap:.45vh;flex:1;justify-content:center";
+  const max = Math.max(...widget.series.map(s => s.value), 1);
+  widget.series.forEach((s, i) => {
+    const row = el("div", "bar-row");
+    row.append(el("div", "lbl", s.label));
+    const track = el("div", "bar-track");
+    const fill = el("div", "bar-fill");
+    fill.style.width = Math.max((s.value / max) * 100, 1).toFixed(1) + "%";
+    fill.style.background = palette(theme, i);
+    track.appendChild(fill);
+    row.append(track, el("div", "val", fmt(s.value, widget.unit)));
+    wrap.appendChild(row);
+  });
+  if (widget.hidden) {
+    const note = el("div", null, `+${widget.hidden} more`);
+    note.style.cssText = "color:var(--muted);font-size:clamp(8px,.7vw,13px)";
+    wrap.appendChild(note);
+  }
+  return wrap;
+}
+
+function renderWidget(widget, theme) {
+  const card = el("div", "card");
+  card.appendChild(el("h3", null, widget.label));
+  if (widget.type === "big_number") {
+    card.appendChild(el("div", "bignum", fmt(widget.value, widget.unit)));
+  } else if (widget.type === "gauge") {
+    card.appendChild(gauge(widget, theme));
+  } else if (widget.type === "trend") {
+    card.appendChild(trendChart(widget, theme));
+  } else if (widget.type === "donut") {
+    const holder = el("div");
+    holder.style.cssText = "display:flex;gap:.6vw;flex:1;min-height:0;align-items:center";
+    holder.appendChild(donut(widget, theme));
+    const legend = el("div", "legend");
+    legend.style.flexDirection = "column";
+    widget.series.forEach((s, i) => {
+      const item = el("div");
+      const swatch = el("i"); swatch.style.background = palette(theme, i);
+      item.append(swatch, document.createTextNode(`${s.label} ${fmt(s.value, widget.unit)}`));
+      legend.appendChild(item);
+    });
+    holder.appendChild(legend);
+    card.appendChild(holder);
+  } else {
+    card.appendChild(barList(widget, theme));
+  }
+  return card;
+}
+
+// ---------------------------------------------------------------- modes
+function repTable(data, withTotal) {
+  const table = el("table");
+  const thead = el("thead"), headRow = el("tr");
+  data.columns.forEach(col => {
+    const th = el("th", col === "rep_name" || col === "team" ? "name" : null,
+                 data.column_short[col] || col);
+    if (col === data.rank_by) th.classList.add("tracked");
+    headRow.appendChild(th);
+  });
+  thead.appendChild(headRow);
+
+  const tbody = el("tbody");
+  (data.reps || []).forEach(rep => {
+    const tr = el("tr");
+    if (rep.rank === 1) tr.className = "rank1";
+    data.columns.forEach(col => {
+      const kind = data.column_kinds[col];
+      const td = el("td", col === "rep_name" || col === "team" ? "name" : null);
+      td.textContent = col === "rank" ? rep.rank : fmt(rep[col], kind);
+      if (col === "rank") td.className = "rankcell";
+      if (col === data.rank_by) td.classList.add("tracked");
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+
+  table.append(thead, tbody);
+
+  if (withTotal && data.total) {
+    const tfoot = el("tfoot"), row = el("tr");
+    data.columns.forEach((col, i) => {
+      const td = el("td", col === "rep_name" || col === "team" ? "name" : null);
+      if (i === 0) td.textContent = "";
+      else if (col === "rep_name") td.textContent = "TOTAL";
+      else if (col === "team") td.textContent = "";
+      else td.textContent = fmt(data.total[col], data.column_kinds[col]);
+      row.appendChild(td);
+    });
+    tfoot.appendChild(row);
+    table.appendChild(tfoot);
+  }
+  return table;
+}
+
+const KPI_KEYS = ["issued_leads", "sold_leads", "close_rate", "gross_split", "net_split", "dpl"];
+
+function teamCard(entry, data, showMvp) {
+  const theme = entry.theme || data.theme;
+  const card = el("div", "teamcard");
+  card.style.setProperty("--primary", theme.primary);
+  card.style.setProperty("--accent", theme.accent);
+  card.style.borderTop = `.5vh solid ${theme.primary}`;
+
+  const top = el("div", "top");
+  const names = el("div");
+  names.appendChild(el("div", "teamname", entry.team));
+  if (entry.lead_name) names.appendChild(el("div", "teamlead", entry.lead_name));
+  top.appendChild(names);
+  top.appendChild(el("div", "placement", entry.placement || (entry.rank ? "#" + entry.rank : "")));
+  card.appendChild(top);
+
+  const kpis = el("div", "kpis");
+  KPI_KEYS.forEach(key => {
+    const kpi = el("div", "kpi");
+    kpi.appendChild(el("div", "k", data.column_short[key] || key));
+    const value = el("div", "v", fmt(entry[key], data.column_kinds[key] || "number"));
+    if (key === data.rank_by) value.classList.add("tracked");
+    kpi.append(value);
+    kpis.appendChild(kpi);
+  });
+  card.appendChild(kpis);
+
+  if (showMvp && entry.mvp) {
+    const mvp = el("div", "mvp");
+    const left = el("div");
+    left.appendChild(el("div", "k", "MVP"));
+    left.appendChild(el("div", null, entry.mvp.rep_name));
+    left.lastChild.style.fontWeight = "700";
+    mvp.append(left, el("div", "placement", fmt(entry.mvp[data.rank_by], data.column_kinds[data.rank_by])));
+    card.appendChild(mvp);
+  }
+  return card;
+}
+
+function renderMain(data) {
+  const main = $("main");
+  main.innerHTML = "";
+
+  if (data.mode === "whole_office" || data.mode === "per_team") {
+    main.appendChild(repTable(data, true));
+    return;
+  }
+
+  const grid = el("div", "grid");
+  const teams = data.teams || [];
+  grid.style.gridTemplateColumns = `repeat(${Math.min(Math.max(teams.length, 1), 4)}, 1fr)`;
+  if (teams.length > 4) grid.style.gridTemplateRows = "repeat(2, 1fr)";
+
+  teams.forEach(entry => {
+    const card = teamCard(entry, data, data.mode === "all_teams");
+    if (data.mode === "team_vs_team" && entry.members) {
+      const list = el("div");
+      list.style.cssText = "display:flex;flex-direction:column;gap:.35vh;margin-top:.5vh;min-height:0;overflow:hidden";
+      entry.members.forEach(member => {
+        const row = el("div", "bar-row");
+        row.style.gridTemplateColumns = "2.2vw 1fr auto";
+        row.append(
+          el("div", "rankcell", "#" + member.rank),
+          el("div", "lbl", member.rep_name),
+          el("div", "val", fmt(member[data.rank_by], data.column_kinds[data.rank_by]))
+        );
+        list.appendChild(row);
+      });
+      card.appendChild(list);
+    }
+    grid.appendChild(card);
+  });
+  main.appendChild(grid);
+}
+
+// ---------------------------------------------------------------- fit
+function fitToScreen() {
+  const main = $("main");
+  const table = main.querySelector("table");
+  if (!table) return;
+  // Shrink rows until the table fits rather than letting the last few reps
+  // fall off the bottom of a wall-mounted screen.
+  let scale = 1;
+  table.style.fontSize = "";
+  while (table.scrollHeight > main.clientHeight && scale > 0.55) {
+    scale -= 0.05;
+    table.style.fontSize = (scale * 100).toFixed(0) + "%";
+  }
+}
+
+// ---------------------------------------------------------------- loop
+function showStatus(message, isError) {
+  const bar = $("status");
+  bar.textContent = message;
+  bar.style.background = isError ? "#7f1d1d" : "#78350f";
+  bar.classList.toggle("show", Boolean(message));
+}
+
+function render(data) {
+  applyTheme(data.theme);
+  $("title").textContent = data.screen.title;
+  $("subtitle").textContent = data.screen.subtitle || "";
+  $("meta").innerHTML =
+    `${data.period.start} &rarr; ${data.period.end}<br>` +
+    `${data.rep_count} reps &middot; ${new Date().toLocaleTimeString()}`;
+
+  const widgets = $("widgets");
+  widgets.innerHTML = "";
+  (data.widgets || []).forEach(w => widgets.appendChild(renderWidget(w, data.theme)));
+  widgets.style.display = (data.widgets || []).length ? "grid" : "none";
+
+  renderMain(data);
+  requestAnimationFrame(fitToScreen);
+
+  if (data.widget_errors && data.widget_errors.length) {
+    showStatus(`${data.widget_errors.length} chart(s) misconfigured: ${data.widget_errors[0].error}`, true);
+  } else {
+    showStatus("", false);
+  }
+  refreshSeconds = Math.max(Number(data.screen.refresh_seconds) || 20, 5);
+}
+
+async function tick() {
+  try {
+    const response = await fetch(ENDPOINT, { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    lastGood = Date.now();
+    consecutiveFailures = 0;
+    render(data);
+  } catch (error) {
+    consecutiveFailures += 1;
+    // The board keeps showing the last good numbers, but says how old they
+    // are. Silently stale figures on a sales floor are worse than none.
+    const age = lastGood ? Math.round((Date.now() - lastGood) / 60000) : null;
+    showStatus(
+      lastGood
+        ? `Connection lost (${consecutiveFailures}x). Showing figures from ${age} min ago.`
+        : `Cannot reach the server: ${error.message}`,
+      consecutiveFailures > 3
+    );
+  } finally {
+    setTimeout(tick, refreshSeconds * 1000);
+  }
+}
+
+window.addEventListener("resize", () => requestAnimationFrame(fitToScreen));
+tick();
+</script>
+</body>
+</html>

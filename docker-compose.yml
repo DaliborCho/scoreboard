@@ -31,5 +31,20 @@ services:
         condition: service_healthy
     command: sh -c "alembic upgrade head && uvicorn scoreboard.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/src"
 
+  worker:
+    build: ./backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-scoreboard}:${POSTGRES_PASSWORD:-scoreboard}@db:5432/${POSTGRES_DB:-scoreboard_dev}
+    volumes:
+      - ./backend/src:/app/src
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_started
+    command: python -m scoreboard.worker
+    restart: unless-stopped
+
 volumes:
   postgres-data:
