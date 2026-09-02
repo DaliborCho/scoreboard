@@ -71,9 +71,19 @@ class User(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(String(320), nullable=False, unique=True)
+    # A short handle to sign in with, for accounts that are not a person's
+    # mailbox: the platform operator, and demo logins. Optional, because a
+    # real customer signs in with the address they were invited at.
+    username: Mapped[str | None] = mapped_column(String(80), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     full_name: Mapped[str] = mapped_column(String(200), default="", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    # Platform operator. Deliberately a property of the account rather than a
+    # Role, because Role answers "what may you do inside one organization" and
+    # this answers "may you stand outside all of them". Conflating the two
+    # would make the tenant guard look like it covers a case it does not.
+    is_superadmin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
 class Membership(Base, TimestampMixin):
@@ -103,7 +113,13 @@ class UserSession(Base):
     __tablename__ = "user_sessions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    org_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+    # Null for a platform operator, who belongs to no organization. Every
+    # tenant-scoped route refuses such a session outright rather than falling
+    # back to "any organization", which is the mistake this nullability makes
+    # visible instead of hiding.
+    org_id: Mapped[int | None] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True
+    )
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     prefix: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False)

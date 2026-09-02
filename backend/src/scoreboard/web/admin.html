@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Scoreboard Platform Admin</title>
+<style>
+:root {
+  --bg: #0b0d12; --panel: #14181f; --panel2: #1a202a; --line: #2b3240;
+  --text: #e8edf5; --muted: #8892a4; --accent: #f59e0b; --good: #2ea043;
+  --bad: #f85149;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+/* An author `display` rule outranks the user-agent rule behind `hidden`. */
+[hidden] { display: none !important; }
+body {
+  background: var(--bg); color: var(--text); min-height: 100vh;
+  font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+a { color: var(--accent); }
+button {
+  font: inherit; cursor: pointer; border: 1px solid var(--line);
+  background: var(--panel2); color: var(--text);
+  padding: .45rem .85rem; border-radius: 7px;
+}
+button:hover:not(:disabled) { border-color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #1a1200; font-weight: 700; }
+button.danger { border-color: #5b2020; color: #ff9a92; }
+button.sm { padding: .2rem .55rem; font-size: 13px; }
+input, select {
+  font: inherit; background: #090c11; color: var(--text);
+  border: 1px solid var(--line); border-radius: 7px; padding: .45rem .6rem; width: 100%;
+}
+label { display: block; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: .25rem; }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: .55rem .6rem; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th:first-child, td:first-child, th.l, td.l { text-align: left; }
+th { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+code { background: #090c11; padding: .15rem .4rem; border-radius: 4px; font-size: 13px; word-break: break-all; }
+
+header.bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: .9rem 2rem; border-bottom: 1px solid var(--line); background: var(--panel);
+}
+header.bar h1 { font-size: 17px; letter-spacing: .04em; }
+header.bar .tag { font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--accent); }
+main { padding: 1.6rem 2rem; max-width: 1300px; }
+h2 { font-size: 20px; margin-bottom: .3rem; }
+.hint { color: var(--muted); font-size: 13px; margin-bottom: 1.1rem; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1.1rem 1.2rem; margin-bottom: 1.1rem; }
+.card h3 { font-size: 15px; margin-bottom: .8rem; }
+.row { display: flex; gap: .7rem; align-items: flex-end; flex-wrap: wrap; }
+.row > * { flex: 1; min-width: 140px; }
+.row > .fixed { flex: none; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: .8rem; }
+.stat { background: var(--panel2); border-radius: 8px; padding: .8rem .9rem; }
+.stat .k { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.stat .v { font-size: 26px; font-weight: 800; color: var(--accent); }
+.pill { display: inline-block; font-size: 11px; padding: .1rem .45rem; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
+.pill.on { border-color: var(--good); color: #7ee2a8; }
+.pill.off { border-color: #5b2020; color: #ff9a92; }
+.warn { border-color: #5a4210; background: #221a06; }
+
+#login { max-width: 22rem; margin: 12vh auto; }
+.stack > * + * { margin-top: .8rem; }
+#toast {
+  position: fixed; right: 1.2rem; bottom: 1.2rem; max-width: 30rem;
+  padding: .8rem 1rem; border-radius: 9px; display: none; z-index: 50;
+  border: 1px solid var(--line); background: var(--panel2); white-space: pre-wrap;
+}
+#toast.show { display: block; }
+#toast.bad { border-color: var(--bad); background: #2a1214; }
+#toast.good { border-color: var(--good); background: #10261a; }
+#modal { position: fixed; inset: 0; background: rgba(0,0,0,.65); display: flex;
+         align-items: center; justify-content: center; padding: 1.5rem; z-index: 60; }
+#modal .card { max-width: 32rem; width: 100%; margin: 0; }
+</style>
+</head>
+<body>
+
+<div id="login" hidden>
+  <div class="card stack">
+    <h2>Platform admin</h2>
+    <div class="hint">Operator sign-in. Company staff use <a href="/console">the console</a>.</div>
+    <div><label>Username</label><input id="li-user" autocomplete="username"></div>
+    <div><label>Password</label><input id="li-pass" type="password" autocomplete="current-password"></div>
+    <button class="primary" id="li-go" style="width:100%">Sign in</button>
+  </div>
+</div>
+
+<div id="app" hidden>
+  <header class="bar">
+    <div><h1>Scoreboard <span class="tag">platform admin</span></h1></div>
+    <div style="display:flex;gap:.6rem;align-items:center">
+      <span class="pill" id="who"></span>
+      <a href="/console"><button class="sm">Company console</button></a>
+      <button class="sm" id="logout">Sign out</button>
+    </div>
+  </header>
+  <main id="view"></main>
+</div>
+
+<div id="modal" hidden></div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+
+const state = { token: localStorage.getItem("sb_admin_token") || "", me: null };
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const num = (n) => Number(n || 0).toLocaleString("en-US");
+
+function toast(message, kind) {
+  const box = $("toast");
+  box.textContent = message;
+  box.className = "show " + (kind || "");
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => box.className = "", kind === "bad" ? 9000 : 4500);
+}
+
+function describe(detail) {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) return detail.map(d => d.msg || describe(d)).join("\n");
+  if (detail && typeof detail === "object") return detail.error || JSON.stringify(detail);
+  return String(detail);
+}
+
+async function api(path, options = {}) {
+  const response = await fetch("/api/v1" + path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(state.token ? { Authorization: "Bearer " + state.token } : {}),
+    },
+  });
+  const text = await response.text();
+  const body = text ? JSON.parse(text) : {};
+  if (!response.ok) {
+    if (response.status === 401 && state.token) signOut(true);
+    throw new Error(describe(body.detail ?? body));
+  }
+  return body;
+}
+
+async function guard(action) {
+  try { await action(); } catch (error) { toast(error.message, "bad"); }
+}
+
+// Same dialog approach as the console: window.prompt and window.confirm are
+// blocked outright in some embedded browsers, where a delete button would
+// silently do nothing.
+function dialog(title, bodyHtml, onConfirm, confirmLabel = "Save") {
+  const host = $("modal");
+  host.innerHTML = `<div class="card">
+      <h3>${esc(title)}</h3>
+      <div class="stack">${bodyHtml}</div>
+      <div class="row" style="margin-top:1rem;justify-content:flex-end">
+        <div class="fixed"><button id="dlg-cancel">Cancel</button></div>
+        <div class="fixed"><button class="primary" id="dlg-ok">${esc(confirmLabel)}</button></div>
+      </div>
+    </div>`;
+  host.hidden = false;
+  const close = () => { host.hidden = true; host.innerHTML = ""; document.removeEventListener("keydown", onKey); };
+  const onKey = (e) => { if (e.key === "Escape") close(); };
+  document.addEventListener("keydown", onKey);
+  $("dlg-cancel").onclick = close;
+  host.onclick = (e) => { if (e.target === host) close(); };
+  $("dlg-ok").onclick = async () => {
+    try { await onConfirm(close); } catch (error) { toast(error.message, "bad"); }
+  };
+  const first = host.querySelector("input, select");
+  if (first) first.focus();
+}
+
+// ---------------------------------------------------------------- session
+async function signIn() {
+  try {
+    const result = await api("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email: $("li-user").value.trim(), password: $("li-pass").value }),
+    });
+    state.token = result.token;
+    localStorage.setItem("sb_admin_token", result.token);
+    await start();
+  } catch (error) { toast(error.message, "bad"); }
+}
+
+function signOut(expired) {
+  state.token = ""; state.me = null;
+  localStorage.removeItem("sb_admin_token");
+  $("app").hidden = true; $("login").hidden = false;
+  if (expired) toast("Session ended. Sign in again.", "bad");
+}
+
+async function start() {
+  let me;
+  try { me = await api("/auth/me"); } catch { return signOut(); }
+
+  // The platform routes answer 404 without the operator flag, so this is how
+  // the page learns whether the account it just signed in is an operator.
+  try { await api("/platform/stats"); }
+  catch {
+    signOut();
+    toast("That account is not a platform operator. Company staff sign in at /console.", "bad");
+    return;
+  }
+
+  state.me = me;
+  $("login").hidden = true; $("app").hidden = false;
+  $("who").textContent = me.user.email;
+  render();
+}
+
+// ---------------------------------------------------------------- view
+async function render() {
+  $("view").innerHTML = `<div class="hint">Loading…</div>`;
+  await guard(async () => {
+    const [stats, { organizations }] = await Promise.all([
+      api("/platform/stats"), api("/platform/organizations"),
+    ]);
+
+    const weakPassword = location.hostname === "localhost" || location.hostname.startsWith("192.168.");
+    $("view").innerHTML = `
+      <h2>Companies</h2>
+      <div class="hint">Every customer on this installation.</div>
+
+      ${weakPassword ? `<div class="card warn">
+        <b>Demo credentials are in use.</b>
+        <div class="hint" style="margin:.3rem 0 0">
+          <code>admin / admin</code> and <code>demo / demo</code> exist so this is easy to look at.
+          Change both before anyone outside this network can reach it.
+        </div></div>` : ""}
+
+      <div class="card"><div class="stats">
+        ${[["Companies", stats.organizations], ["Active", stats.active_organizations],
+           ["Accounts", stats.users], ["Teams", stats.teams], ["Reps", stats.reps],
+           ["Displays", stats.displays], ["Screens", stats.screens], ["Sources", stats.sources]]
+          .map(([k, v]) => `<div class="stat"><div class="k">${k}</div><div class="v">${num(v)}</div></div>`).join("")}
+      </div></div>
+
+      <div class="card"><h3>Add a company</h3>
+        <div class="row">
+          <div><label>Company name</label><input id="o-name" placeholder="Northgate Roofing"></div>
+          <div><label>Sign-in handle</label><input id="o-user" placeholder="northgate"></div>
+          <div><label>Password</label><input id="o-pass" placeholder="leave blank to generate"></div>
+          <div class="fixed"><button class="primary" id="o-add">Create</button></div>
+        </div>
+        <div class="hint" style="margin:.6rem 0 0">Creates the company and its first owner account. The password is shown once.</div>
+      </div>
+
+      <div class="card"><table>
+        <thead><tr>
+          <th class="l">Company</th><th>Teams</th><th>Reps</th><th>People</th>
+          <th>Displays</th><th>Screens</th><th class="l">Status</th><th></th>
+        </tr></thead>
+        <tbody>${organizations.map(o => `<tr>
+          <td class="l"><b>${esc(o.name)}</b> <code>${esc(o.slug)}</code></td>
+          <td>${num(o.counts.teams)}</td><td>${num(o.counts.reps)}</td>
+          <td>${num(o.counts.people)}</td><td>${num(o.counts.displays)}</td>
+          <td>${num(o.counts.screens)}</td>
+          <td class="l">${o.is_active ? '<span class="pill on">active</span>' : '<span class="pill off">suspended</span>'}</td>
+          <td>
+            <button class="sm" data-rename="${o.id}" data-name="${esc(o.name)}">Rename</button>
+            <button class="sm" data-toggle="${o.id}" data-active="${o.is_active}">${o.is_active ? "Suspend" : "Reactivate"}</button>
+            <button class="sm" data-access="${o.id}" data-slug="${esc(o.slug)}">Open</button>
+            <button class="sm danger" data-del="${o.id}" data-slug="${esc(o.slug)}">Delete</button>
+          </td>
+        </tr>`).join("") || `<tr><td class="l" colspan="8">No companies yet.</td></tr>`}</tbody>
+      </table></div>`;
+
+    $("o-add").onclick = () => guard(async () => {
+      const created = await api("/platform/organizations", {
+        method: "POST",
+        body: JSON.stringify({
+          name: $("o-name").value.trim(),
+          owner_username: $("o-user").value.trim(),
+          owner_password: $("o-pass").value,
+        }),
+      });
+      // Redraw first so the new company and the updated counts are visible,
+      // then put the credentials on top of the fresh page. Doing it the other
+      // way round leaves stale totals beside a card announcing a new company.
+      await render();
+      $("view").insertAdjacentHTML("afterbegin",
+        `<div class="card" style="border-color:var(--good)">
+          <h3>${esc(created.name)} created</h3>
+          <div>Sign in at <a href="/console">/console</a> with
+            <code>${esc(created.owner.sign_in_with)}</code> /
+            <code>${esc(created.owner.password)}</code></div>
+          <div class="hint" style="margin-top:.5rem">${esc(created.owner.note)}</div>
+        </div>`);
+      toast("Company created", "good");
+    });
+
+    const on = (selector, handler) =>
+      $("view").querySelectorAll(selector).forEach(node => node.onclick = () => handler(node));
+
+    on("[data-rename]", node => dialog("Rename company",
+      `<div><label>Name</label><input id="r-name" value="${esc(node.dataset.name)}"></div>`,
+      async (close) => {
+        await api(`/platform/organizations/${node.dataset.rename}`, {
+          method: "PATCH", body: JSON.stringify({ name: $("r-name").value.trim() }) });
+        close(); toast("Renamed", "good"); render();
+      }));
+
+    on("[data-toggle]", node => guard(async () => {
+      const active = node.dataset.active === "true";
+      await api(`/platform/organizations/${node.dataset.toggle}`, {
+        method: "PATCH", body: JSON.stringify({ is_active: !active }) });
+      toast(active ? "Suspended. Their sessions ended; televisions keep showing the board." : "Reactivated.", "good");
+      render();
+    }));
+
+    on("[data-access]", node => guard(async () => {
+      // Support access is a real membership, so it shows up in that
+      // customer's own people list and audit log rather than being invisible.
+      await api(`/platform/organizations/${node.dataset.access}/grant-me-access`, {
+        method: "POST", body: JSON.stringify({ role: "owner" }) });
+      toast(`You now have an owner account in ${node.dataset.slug}. Open /console and switch to it.`, "good");
+    }));
+
+    on("[data-del]", node => dialog(`Delete ${node.dataset.slug}`,
+      `<div class="hint">This removes every team, person, screen, display and figure belonging to them. It cannot be undone.</div>
+       <div><label>Type <b>${esc(node.dataset.slug)}</b> to confirm</label><input id="d-slug" placeholder="${esc(node.dataset.slug)}"></div>`,
+      async (close) => {
+        const result = await api(`/platform/organizations/${node.dataset.del}/delete`, {
+          method: "POST", body: JSON.stringify({ confirm_slug: $("d-slug").value.trim() }) });
+        close();
+        toast(`Deleted ${result.deleted.name}: ${result.deleted.teams} teams, ${result.deleted.reps} reps.`, "good");
+        render();
+      }, "Delete for good"));
+  });
+}
+
+$("li-go").onclick = signIn;
+$("li-pass").onkeydown = (e) => { if (e.key === "Enter") signIn(); };
+$("li-user").onkeydown = (e) => { if (e.key === "Enter") $("li-pass").focus(); };
+$("logout").onclick = () => guard(async () => { await api("/auth/logout", { method: "POST" }); signOut(); });
+
+if (state.token) start(); else { $("login").hidden = false; }
+</script>
+</body>
+</html>

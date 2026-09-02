@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from scoreboard.models import Membership, Organization, Role, Team, User, UserSession
@@ -44,16 +44,22 @@ class AuthContext:
     """Who is acting, in which organization, with what authority."""
 
     user: User
-    membership: Membership
+    # None for a platform operator: they act outside every organization, so
+    # there is no role to carry and no tenant to scope to.
+    membership: Membership | None
     session_row: UserSession
 
     @property
-    def org_id(self) -> int:
-        return self.membership.org_id
+    def org_id(self) -> int | None:
+        return self.membership.org_id if self.membership else None
 
     @property
-    def role(self) -> Role:
-        return self.membership.role
+    def role(self) -> Role | None:
+        return self.membership.role if self.membership else None
+
+    @property
+    def is_operator(self) -> bool:
+        return bool(self.user.is_superadmin)
 
 
 # ---------------------------------------------------------------- accounts
@@ -68,10 +74,21 @@ def create_user(session: Session, email: str, password: str, full_name: str = ""
     return user
 
 
-def authenticate(session: Session, email: str, password: str) -> User | None:
-    user = session.scalars(
-        select(User).where(User.email == email.strip().lower(), User.is_active.is_(True))
+def find_account(session: Session, identifier: str) -> User | None:
+    """Look an account up by username or email, whichever was typed."""
+    handle = (identifier or "").strip().lower()
+    if not handle:
+        return None
+    return session.scalars(
+        select(User).where(
+            or_(User.email == handle, User.username == handle),
+            User.is_active.is_(True),
+        )
     ).first()
+
+
+def authenticate(session: Session, identifier: str, password: str) -> User | None:
+    user = find_account(session, identifier)
     if user is None:
         # Hash anyway so a missing account and a wrong password take a similar
         # amount of time and cannot be told apart by measuring.
@@ -132,13 +149,24 @@ def resolve_session(session: Session, token: str) -> AuthContext | None:
         if user is None or not user.is_active:
             return None
 
-        membership = session.scalars(
-            select(Membership).where(
-                Membership.user_id == row.user_id, Membership.org_id == row.org_id
-            )
-        ).first()
-        if membership is None:
-            # Removed from the organization since signing in.
+        membership = None
+        if row.org_id is not None:
+            membership = session.scalars(
+                select(Membership).where(
+                    Membership.user_id == row.user_id, Membership.org_id == row.org_id
+                )
+            ).first()
+            if membership is None:
+                # Removed from the organization since signing in.
+                return None
+            org = session.get(Organization, row.org_id)
+            if org is None or not org.is_active:
+                # Suspended since signing in. Checked on every request rather
+                # than only at sign-in, or a suspension would last exactly
+                # until the person pressed the login button again.
+                return None
+        elif not user.is_superadmin:
+            # Only an operator may hold a session that belongs nowhere.
             return None
 
         row.last_seen_at = now
@@ -190,6 +218,13 @@ def switch_organization(session: Session, context: AuthContext, org_id: int) -> 
 
 # ---------------------------------------------------------------- permissions
 def has_role(context: AuthContext, minimum: Role) -> bool:
+    """Rank check inside one organization.
+
+    An operator with no membership fails every one of these. Platform power is
+    not a very senior role; it is a different question, asked elsewhere.
+    """
+    if context.membership is None:
+        return False
     return ROLE_RANK[context.role] >= ROLE_RANK[minimum]
 
 
@@ -199,7 +234,7 @@ def can_edit_team(session: Session, context: AuthContext, team: Team) -> bool:
     This is what lets a customer hand a team lead their own logo and colours
     without handing them everyone else's.
     """
-    if team.org_id != context.org_id:
+    if context.membership is None or team.org_id != context.org_id:
         return False
     if has_role(context, Role.org_admin):
         return True
@@ -216,6 +251,8 @@ def editable_team_ids(session: Session, context: AuthContext) -> list[int] | Non
     """Team ids this person may edit, or None meaning "all of them"."""
     if has_role(context, Role.org_admin):
         return None
+    if context.membership is None:
+        return []
     if context.role == Role.branch_manager and context.membership.branch_id:
         return [
             team.id

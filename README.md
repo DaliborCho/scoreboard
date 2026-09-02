@@ -39,10 +39,17 @@ docker compose exec api python -m scoreboard.seed
 The API container runs `alembic upgrade head` before serving, so the schema is
 current on every start.
 
-The seed prints an ingest API key and a display URL once. They are stored as
+The seed creates two deliberately trivial logins so the installation can be
+looked at without ceremony — `admin / admin` for the platform panel and
+`demo / demo` for the demo company's console. The admin panel says so on
+every page while it is served from a private address. **Change both before
+this is reachable from anywhere else.**
+
+It also prints an ingest API key and a display URL once. Those are stored as
 hashes and cannot be read again — the same rule a real customer will get.
 
-- `http://localhost:8000/console` — sign in to manage teams, themes and screens
+- `http://localhost:8000/admin` — platform operator: add and manage companies
+- `http://localhost:8000/console` — a company's own staff: teams, themes, screens
 - `http://localhost:8000/tv/<token>` — what a television opens
 - `http://localhost:8000/docs` — interactive API reference
 - `http://localhost:8000/health`
@@ -96,6 +103,7 @@ backend/src/scoreboard/
   connectors/      one module per source system, behind a single interface
   services/        refresh, read, scheduling and screen assembly
   api/             routes, split by credential type
+  api/platform.py  the one module that deliberately crosses organizations
   web/             the two pages a person opens: tv.html and console.html
   worker.py        background refresh loop, its own process
 ```
@@ -147,7 +155,26 @@ before it expires.
 Customer credentials we hold — a Tableau token, for instance — are encrypted
 at rest and never returned by the API. Tokens we issue are stored as hashes.
 
-## Roles
+## Two kinds of authority
+
+**Inside a company:** `owner > org_admin > branch_manager > team_lead > viewer`
+
+**Outside every company:** the platform operator, who adds customers, renames,
+suspends and deletes them, and can see how many teams and people each has.
+
+These are deliberately not the same ladder. Operator status is a flag on the
+account, not a very senior `Role`, because `Role` answers "what may you do
+inside one organization" and this answers "may you stand outside all of them".
+Conflating them would make every tenant guard in the system weaker than it
+reads — `require_role` would quietly become "…or the operator".
+
+The consequences are visible in the code and enforced by tests: an operator
+holds a session that belongs to no organization, fails every rank check, and
+is refused by every tenant-scoped route. Looking inside a customer's data
+means granting yourself an ordinary account there, which appears in that
+customer's own people list and audit log rather than happening invisibly.
+
+## Roles inside a company
 
 `owner > org_admin > branch_manager > team_lead > viewer`
 

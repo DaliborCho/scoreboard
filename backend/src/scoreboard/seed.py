@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sys
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from scoreboard.connectors import build
 from scoreboard.connectors.base import Period
@@ -31,11 +31,39 @@ from scoreboard.services.refresh import apply_records
 from scoreboard.tenancy import TenantScope
 
 SLUG = "demo"
+
+# Deliberately trivial. These exist so the installation can be looked at
+# without ceremony, and the admin panel says so on every page while the host
+# is localhost or a private address. Change both before this is reachable from
+# anywhere else.
+ADMIN_USERNAME = "admin"
+ADMIN_PASSWORD = "admin"
+ADMIN_EMAIL = "admin@scoreboard.invalid"
+
+OWNER_USERNAME = "demo"
+OWNER_PASSWORD = "demo"
 OWNER_EMAIL = "owner@demo-company.com"
-OWNER_PASSWORD = "demo-password-change-me"
 API_KEY_NAME = "Demo ingest key"
 DISPLAY_NAME = "Front office TV"
 TEAMS = ["Team Alpha", "Team Bravo", "Team Charlie", "Undisputed"]
+
+
+def _ensure_account(session, email: str, username: str, password: str, full_name: str) -> User:
+    """Create the account, or bring an existing one back to these credentials."""
+    from scoreboard.security import hash_password
+
+    user = session.scalars(
+        select(User).where(or_(User.email == email, User.username == username))
+    ).first()
+    if user is None:
+        user = create_user(session, email, password, full_name=full_name)
+        print(f"Created account '{username}'")
+    else:
+        user.password_hash = hash_password(password)
+    user.username = username
+    user.is_active = True
+    session.commit()
+    return user
 
 
 def main() -> int:
@@ -63,10 +91,22 @@ def main() -> int:
             scope.add(Team(name=name, branch_id=branch.id, lead_name="", lead_role="Sales Manager"))
     scope.commit()
 
-    owner = session.scalars(select(User).where(User.email == OWNER_EMAIL)).first()
-    if owner is None:
-        owner = create_user(session, OWNER_EMAIL, OWNER_PASSWORD, full_name="Demo Owner")
+    # The platform operator stands outside every organization, so it gets no
+    # membership at all.
+    # The demo accounts are reset to their documented credentials on every
+    # run. That is right for a seed whose whole purpose is "these are the
+    # logins" — but it is exactly why this script must never be pointed at an
+    # installation with real customers on it.
+    admin = _ensure_account(
+        session, ADMIN_EMAIL, ADMIN_USERNAME, ADMIN_PASSWORD, "Platform admin"
+    )
+    if not admin.is_superadmin:
+        admin.is_superadmin = True
         session.commit()
+
+    owner = _ensure_account(
+        session, OWNER_EMAIL, OWNER_USERNAME, OWNER_PASSWORD, "Demo Owner"
+    )
     if scope.one_by(Membership, user_id=owner.id) is None:
         scope.add(Membership(user_id=owner.id, role=Role.owner))
         scope.commit()
@@ -93,8 +133,8 @@ def main() -> int:
     scope.commit()
 
     print("\n" + "=" * 72)
-    print(f"  Console sign-in  {OWNER_EMAIL} / {OWNER_PASSWORD}")
-    print("  Console          http://localhost:8000/console")
+    print(f"  Platform admin   http://localhost:8000/admin     {ADMIN_USERNAME} / {ADMIN_PASSWORD}")
+    print(f"  Company console  http://localhost:8000/console   {OWNER_USERNAME} / {OWNER_PASSWORD}")
     if api_token:
         print(f"  Ingest API key   {api_token}")
     else:

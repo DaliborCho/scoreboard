@@ -99,7 +99,18 @@ def user_scope(
     context: AuthContext = Depends(auth_context),
     session: Session = Depends(get_session),
 ) -> TenantScope:
-    """Tenant scope for the organization this session is currently acting as."""
+    """Tenant scope for the organization this session is currently acting as.
+
+    A platform operator holds a session that belongs nowhere, so it is refused
+    here rather than defaulting to some organization. Support work inside a
+    customer means being given an account there.
+    """
+    if context.org_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This session is not acting for any organization. "
+                   "Open /admin, or grant yourself access to a company first.",
+        )
     return TenantScope(session, context.org_id)
 
 
@@ -113,10 +124,12 @@ def require_role(minimum: Role):
 
     def guard(context: AuthContext = Depends(auth_context)) -> AuthContext:
         if not has_role(context, minimum):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"This action requires {minimum.value} or higher.",
+            detail = (
+                "This session is not acting for any organization."
+                if context.membership is None
+                else f"This action requires {minimum.value} or higher."
             )
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
         return context
 
     return guard

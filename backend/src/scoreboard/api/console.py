@@ -10,7 +10,8 @@ from __future__ import annotations
 from datetime import UTC, date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from scoreboard.api.deps import auth_context, require_role, user_scope
@@ -50,7 +51,10 @@ router = APIRouter(prefix="/api/v1", tags=["console"])
 
 # ---------------------------------------------------------------- sign in
 class LoginRequest(BaseModel):
-    email: EmailStr
+    # An identifier, not necessarily an address: the platform operator and the
+    # demo accounts sign in with a handle. Email format is validated where an
+    # account is created with a mailbox, not here.
+    email: str = Field(min_length=1, max_length=320)
     password: str = Field(min_length=1)
     org_id: int | None = None
 
@@ -94,7 +98,28 @@ def login(
         )
 
     memberships = memberships_for(session, user)
-    if not memberships:
+    if memberships:
+        # A suspended customer cannot sign in at all. Ending their sessions
+        # without this would mean the suspension lasted until someone pressed
+        # the login button again.
+        active = {
+            org.id
+            for org in session.scalars(
+                select(Organization).where(
+                    Organization.id.in_([m.org_id for m in memberships]),
+                    Organization.is_active.is_(True),
+                )
+            ).all()
+        }
+        blocked = len(memberships) - len(active)
+        memberships = [m for m in memberships if m.org_id in active]
+        if blocked and not memberships and not user.is_superadmin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This account is suspended. Contact whoever runs this installation.",
+            )
+
+    if not memberships and not user.is_superadmin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This account does not belong to any organization.",
@@ -102,8 +127,12 @@ def login(
 
     ratelimit.clear(email_bucket)
 
-    chosen = next((m for m in memberships if m.org_id == payload.org_id), memberships[0])
-    token, row = start_session(session, user, chosen.org_id)
+    # A platform operator with no memberships gets a session that belongs to
+    # no organization. Everything tenant-scoped refuses it by design.
+    chosen = next((m for m in memberships if m.org_id == payload.org_id), None)
+    if chosen is None and memberships:
+        chosen = memberships[0]
+    token, row = start_session(session, user, chosen.org_id if chosen else None)
 
     organizations = {
         org.id: org.name
@@ -115,8 +144,9 @@ def login(
         "token": token,
         "expires_at": row.expires_at.isoformat(),
         "user": {"id": user.id, "email": user.email, "full_name": user.full_name},
-        "active_org_id": chosen.org_id,
-        "role": chosen.role.value,
+        "is_operator": user.is_superadmin,
+        "active_org_id": chosen.org_id if chosen else None,
+        "role": chosen.role.value if chosen else None,
         "organizations": [
             {"id": m.org_id, "name": organizations.get(m.org_id, ""), "role": m.role.value}
             for m in memberships
@@ -136,18 +166,19 @@ def logout(
 def me(
     context: AuthContext = Depends(auth_context), session: Session = Depends(get_session)
 ) -> dict:
-    org = session.get(Organization, context.org_id)
+    org = session.get(Organization, context.org_id) if context.org_id else None
     return {
         "user": {
             "id": context.user.id,
             "email": context.user.email,
             "full_name": context.user.full_name,
         },
+        "is_operator": context.user.is_superadmin,
         "organization": {"id": org.id, "name": org.name, "slug": org.slug} if org else None,
-        "role": context.role.value,
+        "role": context.role.value if context.role else None,
         "scope": {
-            "branch_id": context.membership.branch_id,
-            "team_id": context.membership.team_id,
+            "branch_id": context.membership.branch_id if context.membership else None,
+            "team_id": context.membership.team_id if context.membership else None,
         },
         "editable_team_ids": editable_team_ids(session, context),
     }

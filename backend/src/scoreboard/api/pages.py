@@ -42,13 +42,24 @@ def console_page() -> FileResponse:
     return _page("console.html")
 
 
+@router.get("/admin", response_class=HTMLResponse)
+def admin_page() -> FileResponse:
+    """The platform operator's panel.
+
+    Served to anyone who asks; the page is a shell and every call behind it
+    answers 404 without the platform flag, so there is nothing here to guard.
+    """
+    return _page("admin.html")
+
+
 @router.get("/", response_class=HTMLResponse)
 def index() -> HTMLResponse:
     return HTMLResponse(
         "<!doctype html><meta charset=utf-8><title>Scoreboard</title>"
         "<body style='font-family:system-ui;padding:3rem;max-width:40rem'>"
         "<h1>Scoreboard</h1>"
-        "<p><a href='/console'>Console</a> &mdash; sign in to manage teams, themes and screens.</p>"
+        "<p><a href='/console'>Company console</a> &mdash; teams, themes, screens and displays.</p>"
+        "<p><a href='/admin'>Platform admin</a> &mdash; add and manage companies.</p>"
         "<p><a href='/docs'>API reference</a></p>"
         "<p style='color:#666'>A television opens its own link: <code>/tv/&lt;token&gt;</code></p>"
     )
