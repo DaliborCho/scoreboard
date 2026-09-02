@@ -5,101 +5,215 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Scoreboard Console</title>
 <style>
+/* A calm, light interface. The board on the wall is the loud thing; the tool
+   used to configure it should get out of the way. Everything here is built
+   from four surfaces, one accent and a hairline. */
 :root {
-  --bg: #0d1117; --panel: #161b22; --panel2: #1c2230; --line: #2a3140;
-  --text: #e6edf3; --muted: #8b949e; --accent: #4f7cff; --good: #2ea043;
-  --warn: #d29922; --bad: #f85149;
-  --radius: 10px;
+  --bg: #f5f5f7;
+  --card: #ffffff;
+  --sunken: #f0f0f3;
+  --text: #1d1d1f;
+  --muted: #6e6e73;
+  --line: #d8d8dd;
+  --line-soft: #ececf0;
+  --accent: #0071e3;
+  --accent-soft: #e8f2fd;
+  --good: #1d7f36;
+  --good-soft: #e8f6ec;
+  --bad: #c9202e;
+  --bad-soft: #fdecee;
+  --shadow: 0 1px 2px rgba(0,0,0,.05), 0 8px 24px rgba(0,0,0,.05);
+  --r: 12px;
+  --r-sm: 8px;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 /* An author `display` rule outranks the user-agent rule behind the HTML
    `hidden` attribute, so `.wrap { display: grid }` would keep the app
    shell on screen underneath the sign-in form. */
 [hidden] { display: none !important; }
+
 body {
-  background: var(--bg); color: var(--text); min-height: 100vh;
-  font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+        system-ui, Roboto, sans-serif;
   font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
 }
-a { color: var(--accent); }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ---------------------------------------------------------------- controls */
 button {
-  font: inherit; cursor: pointer; border: 1px solid var(--line);
-  background: var(--panel2); color: var(--text);
-  padding: .45rem .85rem; border-radius: 7px;
+  font: inherit; font-weight: 500; cursor: pointer;
+  border: 1px solid var(--line); background: var(--card); color: var(--text);
+  padding: .5rem 1rem; border-radius: var(--r-sm);
+  transition: background .15s ease, border-color .15s ease, transform .06s ease;
 }
-button:hover:not(:disabled) { border-color: var(--accent); }
-button:disabled { opacity: .45; cursor: not-allowed; }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
-button.danger { border-color: #5b2020; color: #ff9a92; }
-button.sm { padding: .2rem .55rem; font-size: 13px; }
+button:hover:not(:disabled) { background: var(--sunken); }
+/* A small press. Enough to feel like the button did something, not enough to
+   move anything around it. */
+button:active:not(:disabled) { transform: scale(.975); }
+button:focus-visible { outline: none; box-shadow: 0 0 0 3.5px var(--accent-soft), 0 0 0 1.5px var(--accent); }
+button:disabled { opacity: .4; cursor: not-allowed; }
+
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover:not(:disabled) { background: #0077ed; border-color: #0077ed; }
+button.danger { color: var(--bad); border-color: #eccdd1; }
+button.danger:hover:not(:disabled) { background: var(--bad-soft); }
+button.sm { padding: .3rem .7rem; font-size: 13.5px; border-radius: 7px; }
+button.ghost { border-color: transparent; background: transparent; color: var(--accent); }
+button.ghost:hover:not(:disabled) { background: var(--accent-soft); }
+
 input, select, textarea {
-  font: inherit; background: #0b0f16; color: var(--text);
-  border: 1px solid var(--line); border-radius: 7px; padding: .45rem .6rem; width: 100%;
+  font: inherit; background: var(--card); color: var(--text);
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  padding: .5rem .7rem; width: 100%;
+  transition: border-color .15s ease, box-shadow .15s ease;
 }
-input[type=color] { padding: 2px; height: 2.3rem; cursor: pointer; }
-label { display: block; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: .25rem; }
+input:focus, select:focus, textarea:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3.5px var(--accent-soft);
+}
+input[type=color] { padding: 3px; height: 2.5rem; cursor: pointer; }
+input[type=file] { border: 1px dashed var(--line); background: var(--sunken); padding: .45rem; font-size: 13px; }
+select {
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8'><path d='M1 1l5 5 5-5' stroke='%236e6e73' stroke-width='1.8' fill='none' stroke-linecap='round'/></svg>");
+  background-repeat: no-repeat; background-position: right .7rem center; padding-right: 2rem;
+}
+label {
+  display: block; font-size: 13px; font-weight: 500;
+  color: var(--muted); margin-bottom: .3rem; letter-spacing: 0; text-transform: none;
+}
+
 table { width: 100%; border-collapse: collapse; }
-th, td { padding: .5rem .6rem; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th, td { padding: .7rem .6rem; text-align: right; border-bottom: 1px solid var(--line-soft); white-space: nowrap; }
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover td { background: #fafafc; }
 th:first-child, td:first-child, th.l, td.l { text-align: left; }
-th { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
-code { background: #0b0f16; padding: .15rem .35rem; border-radius: 4px; font-size: 13px; word-break: break-all; }
-
-.wrap { display: grid; grid-template-columns: 210px 1fr; min-height: 100vh; }
-nav { background: var(--panel); border-right: 1px solid var(--line); padding: 1rem .7rem; }
-nav h1 { font-size: 17px; margin: .2rem .5rem 1rem; }
-nav button { display: block; width: 100%; text-align: left; background: none; border: none; margin-bottom: 2px; color: var(--muted); }
-nav button.on { background: var(--panel2); color: var(--text); font-weight: 600; }
-nav .who { margin-top: 1.2rem; padding: .7rem .5rem; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
-main { padding: 1.6rem 2rem; max-width: 1400px; }
-h2 { font-size: 21px; margin-bottom: .3rem; }
-.hint { color: var(--muted); font-size: 13px; margin-bottom: 1.2rem; }
-.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 1.1rem 1.2rem; margin-bottom: 1.1rem; }
-.card h3 { font-size: 15px; margin-bottom: .8rem; }
-.row { display: flex; gap: .7rem; align-items: flex-end; flex-wrap: wrap; }
-.row > * { flex: 1; min-width: 130px; }
-.row > .fixed { flex: none; }
-.grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: .8rem; }
-.pill { display: inline-block; font-size: 11px; padding: .1rem .45rem; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
-.pill.on { border-color: var(--good); color: #7ee2a8; }
-.pill.off { border-color: #5b2020; color: #ff9a92; }
-
-#toast {
-  position: fixed; right: 1.2rem; bottom: 1.2rem; max-width: 30rem;
-  padding: .8rem 1rem; border-radius: 9px; display: none; z-index: 50;
-  border: 1px solid var(--line); background: var(--panel2); white-space: pre-wrap;
+th { font-size: 13px; font-weight: 500; color: var(--muted); border-bottom: 1px solid var(--line); }
+tfoot td { font-weight: 600; border-top: 1px solid var(--line); border-bottom: none; }
+code {
+  background: var(--sunken); padding: .2rem .45rem; border-radius: 6px;
+  font: 500 13px/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  word-break: break-all;
 }
-#toast.show { display: block; }
-#toast.bad { border-color: var(--bad); background: #2a1214; }
-#toast.good { border-color: var(--good); background: #10261a; }
 
-#login { max-width: 22rem; margin: 12vh auto; }
-#login .card { padding: 1.6rem; }
-.stack > * + * { margin-top: .8rem; }
+/* ---------------------------------------------------------------- shell */
+.wrap { display: grid; grid-template-columns: 232px 1fr; min-height: 100vh; }
+nav {
+  background: var(--card); border-right: 1px solid var(--line);
+  padding: 1.3rem .8rem; display: flex; flex-direction: column;
+}
+nav h1 { font-size: 17px; font-weight: 600; letter-spacing: -.01em; margin: .1rem .6rem 1.1rem; }
+nav button {
+  display: block; width: 100%; text-align: left; border: none; background: none;
+  color: var(--text); font-weight: 400; padding: .5rem .6rem; margin-bottom: 1px;
+  border-radius: var(--r-sm);
+}
+nav button:hover { background: var(--sunken); }
+nav button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+nav .who {
+  margin-top: auto; padding-top: .9rem; border-top: 1px solid var(--line-soft);
+  font-size: 13px; color: var(--muted); line-height: 1.45;
+}
+nav .who b { color: var(--text); font-weight: 600; }
 
-.swatchgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: .8rem; }
-.ratio { display: flex; justify-content: space-between; padding: .3rem 0; border-bottom: 1px solid var(--line); font-size: 13px; }
-.ratio b.ok { color: #7ee2a8; } .ratio b.no { color: #ff9a92; }
-.preview { border-radius: 8px; padding: 1rem; margin-top: .8rem; }
-.widgetrow { display: grid; grid-template-columns: 1.1fr 1.2fr 1fr .8fr auto; gap: .5rem; align-items: end; margin-bottom: .5rem; }
+main { padding: 2rem 2.2rem; max-width: 1400px; }
+h2 { font-size: 26px; font-weight: 600; letter-spacing: -.02em; margin-bottom: .2rem; }
+.hint { color: var(--muted); font-size: 14px; margin-bottom: 1.4rem; }
 
-#modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex;
-         align-items: center; justify-content: center; padding: 1.5rem; z-index: 60; }
-#modal .card { max-width: 34rem; width: 100%; max-height: 82vh; overflow: auto; margin: 0; }
-.artgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 1rem; }
-.artslot { background: var(--panel2); border-radius: 8px; padding: .8rem; }
-.artprev { height: 74px; border: 1px dashed var(--line); border-radius: 6px;
-           display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.card {
+  background: var(--card); border: 1px solid var(--line-soft); border-radius: var(--r);
+  padding: 1.3rem 1.4rem; margin-bottom: 1.1rem; box-shadow: var(--shadow);
+}
+.card h3 { font-size: 16px; font-weight: 600; margin-bottom: .9rem; letter-spacing: -.01em; }
+
+.row { display: flex; gap: .8rem; align-items: flex-end; flex-wrap: wrap; }
+.row > * { flex: 1; min-width: 140px; }
+.row > .fixed { flex: none; min-width: 0; }
+.grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: .9rem; }
+
+.pill {
+  display: inline-block; font-size: 12px; font-weight: 500;
+  padding: .12rem .55rem; border-radius: 999px;
+  background: var(--sunken); color: var(--muted);
+}
+.pill.on { background: var(--good-soft); color: var(--good); }
+.pill.off { background: var(--bad-soft); color: var(--bad); }
+
+/* ---------------------------------------------------------------- feedback */
+#toast {
+  position: fixed; right: 1.4rem; bottom: 1.4rem; max-width: 30rem;
+  padding: .85rem 1.1rem; border-radius: var(--r); display: none; z-index: 50;
+  background: var(--card); border: 1px solid var(--line);
+  box-shadow: 0 8px 30px rgba(0,0,0,.16); white-space: pre-wrap; font-size: 14px;
+}
+#toast.show { display: block; animation: rise .22s ease; }
+#toast.bad { border-color: #f0c8cd; background: var(--bad-soft); color: #8c1520; }
+#toast.good { border-color: #c5e6cf; background: var(--good-soft); color: #14612a; }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } }
+
+#login { max-width: 23rem; margin: 14vh auto; }
+#login .card { padding: 1.9rem; }
+#login h2 { text-align: center; }
+#login .hint { text-align: center; }
+.stack > * + * { margin-top: .9rem; }
+
+#modal {
+  position: fixed; inset: 0; background: rgba(0,0,0,.32); backdrop-filter: blur(3px);
+  display: flex; align-items: center; justify-content: center; padding: 1.5rem; z-index: 60;
+  animation: fade .16s ease;
+}
+#modal .card {
+  max-width: 34rem; width: 100%; max-height: 82vh; overflow: auto; margin: 0;
+  box-shadow: 0 20px 60px rgba(0,0,0,.28); animation: pop .18s ease;
+}
+@keyframes fade { from { opacity: 0; } }
+@keyframes pop { from { opacity: 0; transform: scale(.97) translateY(6px); } }
+
+/* ---------------------------------------------------------------- theme editor */
+.swatchgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: .9rem; }
+.ratio {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: .5rem 0; border-bottom: 1px solid var(--line-soft); font-size: 14px;
+}
+.ratio:last-child { border-bottom: none; }
+.ratio b { font-weight: 600; }
+.ratio b.ok { color: var(--good); }
+.ratio b.no { color: var(--bad); }
+.preview { border-radius: var(--r-sm); padding: 1.1rem; margin-top: .9rem; }
+
+.artgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
+.artslot { background: var(--sunken); border-radius: var(--r-sm); padding: .9rem; }
+.artslot label { margin-bottom: .1rem; color: var(--text); font-weight: 600; }
+.artprev {
+  height: 78px; border: 1px solid var(--line); border-radius: 7px; background: #2a2c31;
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+}
 .artprev img { max-height: 100%; max-width: 100%; object-fit: contain; }
-.artprev .none { color: var(--muted); font-size: 12px; }
+.artprev .none { color: #8b8d93; font-size: 12.5px; }
+
+.widgetrow {
+  display: grid; grid-template-columns: 1.1fr 1.2fr 1fr .8fr auto; gap: .6rem;
+  align-items: end; margin-bottom: .6rem;
+}
+.moverow { display: grid; grid-template-columns: 1fr 12rem; gap: .6rem; align-items: center; margin-bottom: .5rem; }
 
 /* The preview is the television's own page in a frame, scaled down. A second
    renderer would drift from the wall it claims to represent. */
-.boardwrap { position: relative; width: 100%; padding-top: 56.25%; border-radius: 8px;
-             overflow: hidden; border: 1px solid var(--line); background: #000; }
-.boardwrap iframe { position: absolute; inset: 0; width: 1600px; height: 900px;
-                    border: 0; transform-origin: 0 0; }
+.boardwrap {
+  position: relative; width: 100%; padding-top: 56.25%; border-radius: var(--r-sm);
+  overflow: hidden; border: 1px solid var(--line); background: #000;
+}
+.boardwrap iframe { position: absolute; inset: 0; width: 1600px; height: 900px; border: 0; transform-origin: 0 0; }
 
-.moverow { display: grid; grid-template-columns: 1fr 12rem; gap: .5rem; align-items: center; margin-bottom: .4rem; }
+/* A team's crest, shown wherever the team is named. */
+.crest { height: 26px; width: 26px; object-fit: contain; vertical-align: middle; margin-right: .55rem; flex: none; }
+.crest.blank { border-radius: 6px; display: inline-block; }
+.teamname { display: flex; align-items: center; }
 </style>
 </head>
 <body>
@@ -146,7 +260,7 @@ const TABS = [
   { key: "board",     label: "Board",     min: "viewer" },
   { key: "teams",     label: "Teams",     min: "viewer" },
   { key: "people",    label: "People",    min: "viewer" },
-  { key: "theme",     label: "Theme",     min: "team_lead" },
+  { key: "theme",     label: "Brand",     min: "team_lead" },
   { key: "screens",   label: "Screens",   min: "viewer" },
   { key: "displays",  label: "Displays",  min: "branch_manager" },
   { key: "access",    label: "Access",    min: "org_admin" },
@@ -334,7 +448,8 @@ views.board = async () => {
 };
 
 views.teams = async () => {
-  const [{ teams }, { reps }] = await Promise.all([api("/teams"), api("/reps")]);
+  const [{ teams }, { reps }, { themes }] = await Promise.all([
+    api("/teams"), api("/reps"), api("/themes")]);
   state.cache.teams = teams;
   const count = (id) => reps.filter(r => r.team_id === id).length;
   const editable = state.me.editable_team_ids;
@@ -350,15 +465,31 @@ views.teams = async () => {
       <div class="fixed"><button class="primary" id="t-add">Create</button></div>
     </div></div>` : ""}
     <div class="card"><table>
-      <thead><tr><th>Team</th><th class="l">Lead</th><th>Members</th><th></th></tr></thead>
-      <tbody>${teams.map(t => `<tr>
-        <td class="l"><b>${esc(t.name)}</b></td>
-        <td class="l">${esc(t.lead_name) || "<span class=pill>none</span>"} ${t.lead_name ? `<span class=pill>${esc(t.lead_role)}</span>` : ""}</td>
-        <td>${count(t.id)}</td>
-        <td>${mayEdit(t.id) ? `<button class="sm" data-edit="${t.id}">Edit</button>` : ""}
-            ${can("org_admin") ? `<button class="sm danger" data-del="${t.id}">Delete</button>` : ""}</td>
-      </tr>`).join("")}</tbody>
+      <thead><tr><th class="l">Team</th><th class="l">Lead</th><th>Members</th><th></th></tr></thead>
+      <tbody>${teams.map(t => {
+        const art = themes.find(x => x.scope === "team" && x.team_id === t.id)?.tokens || {};
+        const crest = art.badge_url
+          ? `<img class="crest" src="${esc(art.badge_url)}" alt="">`
+          : `<span class="crest blank" style="background:${esc(art.primary || "#d8d8dd")}"></span>`;
+        return `<tr>
+          <td class="l"><span class="teamname">${crest}<b>${esc(t.name)}</b></span></td>
+          <td class="l">${esc(t.lead_name) || '<span class="pill">none</span>'}
+              ${t.lead_name ? `<span class="pill">${esc(t.lead_role)}</span>` : ""}</td>
+          <td>${count(t.id)}</td>
+          <td>${mayEdit(t.id) ? `<button class="sm" data-theme="${t.id}">Theme</button>
+                                 <button class="sm" data-edit="${t.id}">Edit</button>` : ""}
+              ${can("org_admin") ? `<button class="sm danger" data-del="${t.id}">Delete</button>` : ""}</td>
+        </tr>`;
+      }).join("")}</tbody>
     </table></div>`);
+
+  // A team's look belongs beside the team, not in a separate menu where you
+  // first have to remember which of five dropdowns picks the one you meant.
+  onClick("[data-theme]", node => {
+    state.themeTarget = "team:" + node.dataset.theme;
+    state.tab = "theme";
+    start();
+  });
 
   if (can("branch_manager")) $("t-add").onclick = () => guard(async () => {
     await api("/teams", { method: "POST", body: JSON.stringify({
@@ -449,7 +580,7 @@ views.theme = async () => {
   if (!targets.length) return section("Theme", "You have no team to style.", "");
 
   const tokens = { ...catalogue.defaults };
-  section("Theme", "Colours, a logo and a font. Never CSS &mdash; and a theme that would be unreadable is refused, not saved with a warning.", `
+  section("Brand", "Colours, artwork and a font &mdash; never CSS. A theme that would be unreadable on a screen is refused, not saved with a warning. Each team can carry its own; anything it does not set is inherited from the organization.", `
     <div class="card">
       <div class="row">
         <div><label>Applies to</label><select id="th-target">${targets.map(t =>
@@ -569,6 +700,12 @@ views.theme = async () => {
     });
     refresh(); drawArtwork(); drawBoard();
   };
+  // Arriving from a team's Theme button preselects that team, so the editor
+  // opens on the thing that was clicked.
+  if (state.themeTarget && targets.some(t => t.value === state.themeTarget)) {
+    $("th-target").value = state.themeTarget;
+  }
+  state.themeTarget = null;
   $("th-target").onchange();
 
   $("view").querySelectorAll("[data-upload]").forEach(input => input.onchange = () => guard(async () => {

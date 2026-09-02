@@ -187,6 +187,10 @@ everyone else's.
 `tests/test_auth.py` fails if a mutating endpoint is added without a
 credential dependency — the mistake that actually happens.
 
+A team's look is edited from the team itself, in the Teams list, rather than
+from a separate menu where you would first have to remember which of five
+dropdowns picks the one you meant.
+
 ## Themes
 
 Colours, a logo and a font from a curated set. Never CSS.
@@ -211,6 +215,13 @@ an optional frame in the team colour complete the look. The background dim is
 part of the theme and is validated on save — contrast is measured against the
 flat colour, so artwork is never allowed to show through brightly enough to
 fight the text in front of it.
+
+The demo organization ships with placeholder crests so a fresh installation
+looks like a leaderboard rather than a spreadsheet. The files are committed
+under `backend/src/scoreboard/demo_assets/`; `tools/make_demo_logos.py` is how
+they were drawn, and it wants Pillow, which the product itself does not — the
+application never processes an image, it only stores and serves what it is
+given.
 
 ## Previewing
 

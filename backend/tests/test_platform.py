@@ -105,7 +105,7 @@ def test_slug_helpers_exist(name):
     "raw,expected",
     [
         ("Northgate Roofing", "northgate-roofing"),
-        ("  DaBella  ", "dabella"),
+        ("  Northgate  ", "northgate"),
         ("A & B, Ltd.", "a-b-ltd"),
         ("", "org"),
         ("---", "org"),

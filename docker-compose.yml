@@ -27,6 +27,7 @@ services:
       - ./backend/tests:/app/tests
       - ./backend/alembic:/app/alembic
       - ./backend/pyproject.toml:/app/pyproject.toml:ro
+      - ./tools:/app/tools:ro
       - asset-data:/data/assets
     depends_on:
       db:

@@ -559,7 +559,12 @@ function showStatus(message, isError) {
 
 function render(data) {
   applyTheme(data.theme);
+  // A hero carries the name already. Printing it again underneath is the
+  // board saying the same thing twice, which is what the reference boards
+  // pointedly do not do.
+  const hasHero = Boolean(data.theme.hero_url);
   $("title").textContent = data.screen.title;
+  $("title").hidden = hasHero;
   $("subtitle").textContent = data.screen.subtitle || "";
   $("meta").innerHTML =
     `${data.period.start} &rarr; ${data.period.end}<br>` +

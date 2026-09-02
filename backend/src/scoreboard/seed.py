@@ -9,6 +9,7 @@ customer creating one in the console.
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 from sqlalchemy import or_, select
 
@@ -45,7 +46,87 @@ OWNER_PASSWORD = "demo"
 OWNER_EMAIL = "owner@demo-company.com"
 API_KEY_NAME = "Demo ingest key"
 DISPLAY_NAME = "Front office TV"
-TEAMS = ["Team Alpha", "Team Bravo", "Team Charlie", "Undisputed"]
+# Name, crest slug, and the palette its artwork was drawn in. The colours are
+# bright on purpose: the first pass used deeper shades and the theme validator
+# refused them for failing the 3:1 minimum against a dark board.
+TEAMS = [
+    ("Team Alpha", "alpha", "#ef4444", "#fcd34d"),
+    ("Team Bravo", "bravo", "#22c55e", "#86efac"),
+    ("Team Charlie", "charlie", "#06b6d4", "#67e8f9"),
+    ("Team Delta", "delta", "#f97316", "#fdba74"),
+    ("Undisputed", "undisputed", "#a855f7", "#e9d5ff"),
+]
+
+ORG_TOKENS = {
+    "background": "#0a1020", "surface": "#121b33", "text": "#ffffff",
+    "muted": "#9fb0d4", "primary": "#3b6cf6", "accent": "#fbbf24",
+    "font": "barlow", "frame": "ornate",
+}
+
+
+DEMO_ARTWORK = Path(__file__).resolve().parent / "demo_assets"
+
+
+def _install_artwork(scope: TenantScope, uploaded_by: int) -> None:
+    """Give the demo organization crests, so it looks like a leaderboard.
+
+    The files are committed rather than generated, so a fresh installation
+    needs nothing beyond the application itself. `tools/make_demo_logos.py`
+    is how they were drawn; it wants Pillow, which the product does not.
+    """
+    from scoreboard.domain.theme import validate
+    from scoreboard.models import Asset, Theme
+    from scoreboard.services import assets as store
+
+    if not DEMO_ARTWORK.exists():
+        return
+
+    def publish(filename: str) -> str:
+        """Store one file once, and return the URL to reach it by."""
+        path = DEMO_ARTWORK / filename
+        if not path.exists():
+            return ""
+        existing = scope.one_by(Asset, filename=filename)
+        if existing:
+            return f"/assets/{existing.public_key}"
+        stored = store.save(scope.org_id, path.read_bytes(), "image/png")
+        scope.add(
+            Asset(
+                public_key=stored.key, filename=filename,
+                content_type=stored.content_type, size_bytes=stored.size,
+                sha256=stored.sha256, uploaded_by=uploaded_by,
+            )
+        )
+        scope.flush()
+        return f"/assets/{stored.key}"
+
+    def save_theme(theme_scope: str, team_id: int | None, name: str, tokens: dict) -> None:
+        # Run the same validation the API does. A seed that could plant an
+        # unreadable board would make the rule a lie.
+        problems = validate(tokens)
+        if problems:
+            print(f"  skipped {name} theme: {problems[0].message}")
+            return
+        existing = scope.one_by(Theme, scope=theme_scope, team_id=team_id)
+        if existing is None:
+            scope.add(Theme(scope=theme_scope, team_id=team_id, name=name, tokens=tokens))
+        else:
+            existing.tokens = tokens
+
+    save_theme("org", None, "Demo Brand", {**ORG_TOKENS, "hero_url": publish("hero-office.png")})
+
+    for team_name, slug, primary, accent in TEAMS:
+        team = scope.one_by(Team, name=team_name)
+        if team is None:
+            continue
+        save_theme("team", team.id, slug, {
+            "primary": primary, "accent": accent, "frame": "ornate",
+            "badge_url": publish(f"badge-{slug}.png"),
+            "hero_url": publish(f"hero-{slug}.png"),
+        })
+
+    scope.commit()
+    print(f"Installed demo artwork for {len(TEAMS)} teams")
 
 
 def _ensure_account(session, email: str, username: str, password: str, full_name: str) -> User:
@@ -86,7 +167,7 @@ def main() -> int:
         branch = scope.add(Branch(name="Olympia"))
         scope.flush()
 
-    for name in TEAMS:
+    for name, *_ in TEAMS:
         if scope.one_by(Team, name=name) is None:
             scope.add(Team(name=name, branch_id=branch.id, lead_name="", lead_role="Sales Manager"))
     scope.commit()
@@ -110,6 +191,8 @@ def main() -> int:
     if scope.one_by(Membership, user_id=owner.id) is None:
         scope.add(Membership(user_id=owner.id, role=Role.owner))
         scope.commit()
+
+    _install_artwork(scope, owner.id)
 
     # Load demo numbers through the same path a real source would use.
     period = Period.current_month()
