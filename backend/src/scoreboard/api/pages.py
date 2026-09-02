@@ -42,6 +42,23 @@ def console_page() -> FileResponse:
     return _page("console.html")
 
 
+@router.get("/preview/screen/{screen_id}", response_class=HTMLResponse)
+def preview_screen_page(screen_id: int) -> FileResponse:
+    """Preview a saved screen using the television's own renderer.
+
+    Serving the same file rather than a second implementation is the point: a
+    preview built separately drifts, and then it is showing something nobody
+    will ever see on a wall.
+    """
+    return _page("tv.html")
+
+
+@router.get("/preview/live", response_class=HTMLResponse)
+def preview_live_page() -> FileResponse:
+    """Preview an unsaved combination, for the theme and screen editors."""
+    return _page("tv.html")
+
+
 @router.get("/admin", response_class=HTMLResponse)
 def admin_page() -> FileResponse:
     """The platform operator's panel.

@@ -28,6 +28,8 @@ FONTS = {
 
 DENSITIES = ("comfortable", "compact")
 
+FRAMES = ("none", "line", "ornate")
+
 COLOR_TOKENS = ("background", "surface", "text", "muted", "primary", "accent")
 
 DEFAULT_TOKENS: dict = {
@@ -39,8 +41,25 @@ DEFAULT_TOKENS: dict = {
     "accent": "#f5a524",
     "font": "inter",
     "density": "comfortable",
+
+    # Artwork. A team's identity on a wall is carried by its crest far more
+    # than by its name in a header, which is why there are three slots rather
+    # than one "logo".
+    #
+    #   hero    the large wordmark across the top of the board
+    #   badge   the small crest shown beside each rep in the team column
+    #   logo    a modest mark in the header, when a hero is too much
+    "hero_url": "",
+    "badge_url": "",
     "logo_url": "",
     "background_image_url": "",
+
+    # An ornate border in the team colour, as on a physical scoreboard. Off by
+    # default because it costs vertical space a dense table may need.
+    "frame": "none",
+    # How hard the background artwork is dimmed. Text contrast is checked
+    # against the flat colour, so artwork must never be allowed to fight it.
+    "background_dim": 55,
 }
 
 # Web minimum is 4.5 for body text. A board is read across a room, so text on
@@ -128,6 +147,27 @@ def validate(tokens: dict) -> list[Problem]:
         problems.append(
             Problem("density", f"Choose one of: {', '.join(DENSITIES)}.")
         )
+    if resolved["frame"] not in FRAMES:
+        problems.append(Problem("frame", f"Choose one of: {', '.join(FRAMES)}."))
+
+    try:
+        dim = int(resolved["background_dim"])
+    except (TypeError, ValueError):
+        problems.append(Problem("background_dim", "Dim must be a number between 0 and 90."))
+    else:
+        if not 0 <= dim <= 90:
+            problems.append(Problem("background_dim", "Dim must be between 0 and 90."))
+        elif resolved["background_image_url"] and dim < 35:
+            # Contrast is measured against the flat colour. Artwork showing
+            # through too brightly would make a board that passes the check
+            # and is still unreadable on the wall.
+            problems.append(
+                Problem(
+                    "background_dim",
+                    "With background artwork, dim at least 35% or the text will "
+                    "compete with the picture.",
+                )
+            )
 
     checks = (
         ("text", "background", MIN_CONTRAST_TEXT, "Main text on the board background"),
@@ -184,6 +224,8 @@ def catalogue() -> dict:
     return {
         "fonts": [{"key": k, "stack": v} for k, v in sorted(FONTS.items())],
         "densities": list(DENSITIES),
+        "frames": list(FRAMES),
+        "artwork_tokens": ["hero_url", "badge_url", "logo_url", "background_image_url"],
         "color_tokens": list(COLOR_TOKENS),
         "defaults": dict(DEFAULT_TOKENS),
         "minimums": {

@@ -6,7 +6,7 @@ a theme that would be unreadable is refused rather than saved with a warning.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -16,6 +16,7 @@ from scoreboard.domain import charts
 from scoreboard.domain import theme as theme_domain
 from scoreboard.domain.leaderboard import MODES
 from scoreboard.models import DisplayToken, Role, Screen, Team, Theme
+from scoreboard.security import generate_token
 from scoreboard.services import audit
 from scoreboard.services.auth import AuthContext, can_edit_team
 from scoreboard.services.screens import render
@@ -325,3 +326,72 @@ def set_rotation(
     )
     scope.commit()
     return {"ok": True, "rotation": display.rotation}
+
+
+@router.get("/preview")
+def preview_live(
+    mode: str = "whole_office",
+    rank_by: str = "net_split",
+    team: str = "",
+    teams: list[str] = Query(default=[]),
+    title: str = "",
+    scope: TenantScope = Depends(user_scope),
+) -> dict:
+    """Render a combination that has not been saved as a screen.
+
+    Used while someone is still choosing colours or a mode. Returns exactly
+    what a television would receive, so the preview is the real thing rather
+    than a drawing of it.
+    """
+    if mode not in MODES:
+        raise HTTPException(status_code=404, detail=f"Unknown mode '{mode}'.")
+
+    draft = Screen(
+        org_id=scope.org_id,
+        name="Preview",
+        mode=mode,
+        config={
+            "rank_by": rank_by,
+            "team": team,
+            "teams": list(teams),
+            "title": title or "PREVIEW",
+            "refresh_seconds": 3600,
+        },
+    )
+    return render(scope, draft)
+
+
+@router.post("/display-tokens/{display_id}/regenerate")
+def regenerate_display_token(
+    display_id: int,
+    context: AuthContext = Depends(require_role(Role.branch_manager)),
+    scope: TenantScope = Depends(user_scope),
+) -> dict:
+    """Issue a new link for an existing television.
+
+    The link is stored hashed and shown once, which is right until somebody
+    closes the tab before writing it down — and then the display is
+    unreachable with no way back. This is that way back. The previous link
+    stops working immediately, which is also what you want if it leaked.
+    """
+    display = scope.get(DisplayToken, display_id)
+    if display is None:
+        raise HTTPException(status_code=404, detail="Display not found.")
+
+    token, prefix, hashed = generate_token("tv")
+    display.prefix = prefix
+    display.token_hash = hashed
+    display.revoked_at = None
+
+    audit.record(
+        scope, "display_token.regenerate", actor_user_id=context.user.id,
+        actor_label=context.user.email, target=display.name,
+    )
+    scope.commit()
+    return {
+        "ok": True,
+        "id": display.id,
+        "name": display.name,
+        "url": f"/tv/{token}",
+        "note": "The previous link stopped working. Shown once.",
+    }

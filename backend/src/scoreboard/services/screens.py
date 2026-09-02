@@ -93,6 +93,21 @@ def render(
             team = teams_by_name.get(entry.get("team", ""))
             entry["theme"] = resolved_theme(base, overrides.get(team.id) if team else None)
 
+    # Every mode gets the badge and colour of each team, so a whole-office
+    # table can show a crest beside each rep instead of repeating team names
+    # as text. This is how the boards this replaces are actually read across a
+    # room: people recognise the mark, not the word.
+    payload["team_art"] = {
+        name: {
+            "badge_url": tokens.get("badge_url", ""),
+            "primary": tokens.get("primary", theme["primary"]),
+            "accent": tokens.get("accent", theme["accent"]),
+        }
+        for name, team in teams_by_name.items()
+        for tokens in [resolve(base, overrides.get(team.id))]
+        if tokens.get("badge_url") or overrides.get(team.id)
+    }
+
     # ------------------------------------------------------------ widgets
     widget_specs = list(config.get("widgets") or [])
     needs_trend = any(w.get("type") == "trend" for w in widget_specs)

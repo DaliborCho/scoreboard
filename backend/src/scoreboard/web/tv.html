@@ -49,9 +49,11 @@ h1 { font-size: clamp(22px, 3.4vw, 64px); font-weight: 700; letter-spacing: .02e
 }
 .bignum { font-size: clamp(20px, 3.1vw, 58px); font-weight: 800; line-height: 1; color: var(--accent, #f5a524); }
 
-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+/* Fixed layout with an explicit colgroup. Left to distribute evenly it cut
+   rep names in half, which is the one thing a leaderboard may never do. */
+table { width: 100%; height: 100%; border-collapse: collapse; table-layout: fixed; }
 th, td { padding: .55vh .5vw; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-th:nth-child(1), td:nth-child(1) { width: 3.2vw; text-align: center; }
+th:nth-child(1), td:nth-child(1) { text-align: center; }
 th.name, td.name { text-align: left; }
 th {
   font-size: clamp(9px, .82vw, 15px); font-weight: 600; letter-spacing: .1em;
@@ -93,6 +95,32 @@ tfoot td {
 .legend { display: flex; flex-wrap: wrap; gap: .3vh .7vw; font-size: clamp(8px, .75vw, 14px); color: var(--muted); }
 .legend i { display: inline-block; width: .7vw; height: .7vw; border-radius: 2px; margin-right: .25vw; vertical-align: middle; }
 
+/* The team crest across the top. On the boards this replaces, the mark is
+   what identifies the screen from the far side of the room — far more than
+   the name in the header does. */
+.hero { display: block; margin: 0 auto .4vh; max-height: 15vh; max-width: 62vw; object-fit: contain; flex: none; }
+
+/* An ornate border in the team colour, as on a physical scoreboard. */
+#stage[data-frame="line"] { border: .35vh solid var(--primary); border-radius: .5vw; }
+#stage[data-frame="ornate"] {
+  border: .5vh double var(--accent);
+  border-radius: .6vw;
+  box-shadow: inset 0 0 0 .18vh var(--primary), inset 0 0 4vh rgba(0,0,0,.45);
+}
+
+/* A crest in the team column instead of the team's name repeated in text. */
+.badge { height: 2.4vh; width: auto; max-width: 3.2vw; object-fit: contain; vertical-align: middle; }
+td.teamcell { text-align: center; }
+.teamdot { display: inline-block; width: 1.1vh; height: 1.1vh; border-radius: 50%; vertical-align: middle; }
+
+/* The leader wears a band of their own team's colour, full width. */
+tr.rank1 td { background: var(--leader-band, rgba(255,255,255,.08)); }
+tr.rank1 td.name { font-weight: 800; }
+
+/* Tiny captions under the total row, as on the original boards. */
+tfoot .sublabel { display: block; font-size: clamp(6px, .52vw, 10px); font-weight: 500;
+                  letter-spacing: .08em; color: var(--muted); text-transform: uppercase; }
+
 #status {
   position: fixed; left: 0; right: 0; bottom: 0;
   background: #7f1d1d; color: #fff; padding: 1vh 2vw;
@@ -104,6 +132,7 @@ tfoot td {
 </head>
 <body>
 <div id="stage">
+  <img id="hero" class="hero" alt="" hidden>
   <header>
     <div>
       <h1 id="title">Loading</h1>
@@ -124,8 +153,21 @@ tfoot td {
 <script>
 "use strict";
 
-const TOKEN = location.pathname.split("/").filter(Boolean).pop();
-const ENDPOINT = `/api/v1/display/${encodeURIComponent(TOKEN)}/screen`;
+// One renderer, three ways in. A preview built as a second implementation
+// drifts from the wall it is meant to represent, so the console opens this
+// very page instead.
+const PATH = location.pathname.split("/").filter(Boolean);
+const IS_PREVIEW = PATH[0] === "preview";
+const CONSOLE_TOKEN = IS_PREVIEW ? (localStorage.getItem("sb_token") || "") : "";
+
+let ENDPOINT;
+if (!IS_PREVIEW) {
+  ENDPOINT = `/api/v1/display/${encodeURIComponent(PATH[PATH.length - 1])}/screen`;
+} else if (PATH[1] === "screen") {
+  ENDPOINT = `/api/v1/screens/${encodeURIComponent(PATH[2])}/render`;
+} else {
+  ENDPOINT = `/api/v1/preview${location.search}`;
+}
 
 // When a television is cycling, the next screen is chosen by the server and
 // carried in the payload. The page never keeps its own list, so a rotation
@@ -169,11 +211,22 @@ function applyTheme(theme) {
     if (theme[key]) root.setProperty("--" + key, theme[key]);
   }
   root.setProperty("--font-stack", theme.font_stack || "Inter, system-ui, sans-serif");
+
+  // The dim is part of the theme and is validated on save, so artwork can
+  // never be left bright enough to fight the text it sits behind.
+  const dim = Math.min(Math.max(Number(theme.background_dim ?? 55), 0), 90) / 100;
   document.body.style.backgroundImage = theme.background_image_url
-    ? `linear-gradient(rgba(0,0,0,.55),rgba(0,0,0,.55)), url("${theme.background_image_url}")`
+    ? `linear-gradient(rgba(0,0,0,${dim}),rgba(0,0,0,${dim})), url("${theme.background_image_url}")`
     : "none";
   document.body.style.backgroundSize = "cover";
   document.body.style.backgroundPosition = "center";
+
+  const stage = $("stage");
+  stage.dataset.frame = theme.frame || "none";
+
+  const hero = $("hero");
+  if (theme.hero_url) { hero.src = theme.hero_url; hero.hidden = false; }
+  else { hero.hidden = true; }
 
   const logo = $("logo");
   if (theme.logo_url) { logo.src = theme.logo_url; logo.hidden = false; }
@@ -308,8 +361,21 @@ function renderWidget(widget, theme) {
 }
 
 // ---------------------------------------------------------------- modes
+// Rank and the team crest need very little; a name needs enough to be a name.
+// Everything else shares what is left.
+const COLUMN_WIDTH = { rank: "3.4vw", rep_name: "14vw", team: "4vw" };
+
 function repTable(data, withTotal) {
   const table = el("table");
+
+  const group = document.createElement("colgroup");
+  data.columns.forEach(col => {
+    const column = document.createElement("col");
+    if (COLUMN_WIDTH[col]) column.style.width = COLUMN_WIDTH[col];
+    group.appendChild(column);
+  });
+  table.appendChild(group);
+
   const thead = el("thead"), headRow = el("tr");
   data.columns.forEach(col => {
     const th = el("th", col === "rep_name" || col === "team" ? "name" : null,
@@ -319,13 +385,48 @@ function repTable(data, withTotal) {
   });
   thead.appendChild(headRow);
 
+  const art = data.team_art || {};
+
   const tbody = el("tbody");
   (data.reps || []).forEach(rep => {
     const tr = el("tr");
-    if (rep.rank === 1) tr.className = "rank1";
+    const teamArt = art[rep.team];
+    if (rep.rank === 1) {
+      tr.className = "rank1";
+      // The leader's band is their own team's colour, not the board's, so a
+      // whole-office table still says at a glance who is winning it.
+      const band = (teamArt && teamArt.primary) || data.theme.accent;
+      tr.style.setProperty("--leader-band", `color-mix(in srgb, ${band} 38%, transparent)`);
+    }
+
     data.columns.forEach(col => {
       const kind = data.column_kinds[col];
-      const td = el("td", col === "rep_name" || col === "team" ? "name" : null);
+
+      if (col === "team") {
+        const td = el("td", "teamcell");
+        if (teamArt && teamArt.badge_url) {
+          const badge = document.createElement("img");
+          badge.className = "badge";
+          badge.src = teamArt.badge_url;
+          badge.alt = rep.team;
+          badge.title = rep.team;
+          td.appendChild(badge);
+        } else if (teamArt && teamArt.primary) {
+          // No crest uploaded yet: a dot in the team colour still groups the
+          // table visually, where a repeated word only adds noise.
+          const dot = el("span", "teamdot");
+          dot.style.background = teamArt.primary;
+          dot.title = rep.team;
+          td.appendChild(dot);
+        } else {
+          td.className = "name";
+          td.textContent = rep.team;
+        }
+        tr.appendChild(td);
+        return;
+      }
+
+      const td = el("td", col === "rep_name" ? "name" : null);
       td.textContent = col === "rank" ? rep.rank : fmt(rep[col], kind);
       if (col === "rank") td.className = "rankcell";
       if (col === data.rank_by) td.classList.add("tracked");
@@ -339,11 +440,16 @@ function repTable(data, withTotal) {
   if (withTotal && data.total) {
     const tfoot = el("tfoot"), row = el("tr");
     data.columns.forEach((col, i) => {
-      const td = el("td", col === "rep_name" || col === "team" ? "name" : null);
-      if (i === 0) td.textContent = "";
-      else if (col === "rep_name") td.textContent = "TOTAL";
-      else if (col === "team") td.textContent = "";
-      else td.textContent = fmt(data.total[col], data.column_kinds[col]);
+      const td = el("td", col === "rep_name" ? "name" : null);
+      if (i === 0 || col === "team") {
+        td.textContent = "";
+      } else if (col === "rep_name") {
+        td.textContent = "TOTAL";
+      } else {
+        td.textContent = fmt(data.total[col], data.column_kinds[col]);
+        const caption = el("span", "sublabel", data.column_labels[col] || col);
+        td.appendChild(caption);
+      }
       row.appendChild(td);
     });
     tfoot.appendChild(row);
@@ -486,7 +592,10 @@ function render(data) {
 async function tick() {
   const url = nextScreenId ? `${ENDPOINT}?screen_id=${nextScreenId}` : ENDPOINT;
   try {
-    const response = await fetch(url, { cache: "no-store" });
+    const response = await fetch(url, {
+      cache: "no-store",
+      headers: CONSOLE_TOKEN ? { Authorization: "Bearer " + CONSOLE_TOKEN } : {},
+    });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
     lastGood = Date.now();
@@ -497,11 +606,17 @@ async function tick() {
     // The board keeps showing the last good numbers, but says how old they
     // are. Silently stale figures on a sales floor are worse than none.
     const age = lastGood ? Math.round((Date.now() - lastGood) / 60000) : null;
+    // A preview borrows the console's session from this browser. Opened
+    // without one it fails with a bare 401, which reads like the board is
+    // broken rather than like nobody is signed in.
+    const noSession = IS_PREVIEW && !lastGood && /401/.test(error.message);
     showStatus(
-      lastGood
+      noSession
+        ? "Sign in to the console in this browser first — a preview uses that session."
+        : lastGood
         ? `Connection lost (${consecutiveFailures}x). Showing figures from ${age} min ago.`
         : `Cannot reach the server: ${error.message}`,
-      consecutiveFailures > 3
+      consecutiveFailures > 3 && !noSession
     );
   } finally {
     // While cycling, the rotation interval governs; otherwise it is the

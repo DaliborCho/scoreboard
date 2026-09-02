@@ -203,6 +203,23 @@ team's palette on its own card, while the whole-office board wears the
 organization's, so no single team's brand takes over a screen that belongs to
 everybody.
 
+Artwork has three slots rather than one "logo", because on a wall a team is
+recognised by its crest long before its name is read: a **hero** banner across
+the top, a **badge** shown beside each rep in the team column, and a modest
+**header logo** for boards where a hero is too much. A background texture and
+an optional frame in the team colour complete the look. The background dim is
+part of the theme and is validated on save — contrast is measured against the
+flat colour, so artwork is never allowed to show through brightly enough to
+fight the text in front of it.
+
+## Previewing
+
+The console does not draw its own version of a board. `/preview/screen/<id>`
+and `/preview/live?mode=…` serve the television's own page, authenticated by
+the console session already in that browser, and the console embeds it in a
+scaled frame. A preview built as a second implementation drifts, and then it
+is showing something nobody will ever see on a wall.
+
 ## Displays
 
 A television carries a long unguessable link instead of signing in, and can

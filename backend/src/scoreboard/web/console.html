@@ -85,6 +85,20 @@ h2 { font-size: 21px; margin-bottom: .3rem; }
 #modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex;
          align-items: center; justify-content: center; padding: 1.5rem; z-index: 60; }
 #modal .card { max-width: 34rem; width: 100%; max-height: 82vh; overflow: auto; margin: 0; }
+.artgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 1rem; }
+.artslot { background: var(--panel2); border-radius: 8px; padding: .8rem; }
+.artprev { height: 74px; border: 1px dashed var(--line); border-radius: 6px;
+           display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.artprev img { max-height: 100%; max-width: 100%; object-fit: contain; }
+.artprev .none { color: var(--muted); font-size: 12px; }
+
+/* The preview is the television's own page in a frame, scaled down. A second
+   renderer would drift from the wall it claims to represent. */
+.boardwrap { position: relative; width: 100%; padding-top: 56.25%; border-radius: 8px;
+             overflow: hidden; border: 1px solid var(--line); background: #000; }
+.boardwrap iframe { position: absolute; inset: 0; width: 1600px; height: 900px;
+                    border: 0; transform-origin: 0 0; }
+
 .moverow { display: grid; grid-template-columns: 1fr 12rem; gap: .5rem; align-items: center; margin-bottom: .4rem; }
 </style>
 </head>
@@ -447,17 +461,36 @@ views.theme = async () => {
       <div class="swatchgrid" style="margin-top:1rem">${catalogue.color_tokens.map(key =>
         `<div><label>${key}</label><input type="color" data-tok="${key}" value="${tokens[key]}"></div>`).join("")}</div>
       <div class="row" style="margin-top:1rem">
-        <div><label>Logo</label><input data-tok="logo_url" placeholder="upload below, or paste a URL"></div>
-        <div><label>Upload an image</label><input type="file" id="th-logo" accept="image/png,image/jpeg,image/webp,image/gif"></div>
+        <div><label>Frame</label><select id="th-frame">${catalogue.frames.map(f =>
+          `<option value="${f}">${f}</option>`).join("")}</select></div>
+        <div><label>Background dim %</label><input data-tok="background_dim" type="number" min="0" max="90" value="55"></div>
         <div class="fixed"><button class="primary" id="th-save">Save theme</button></div>
       </div>
-      <div class="hint" id="th-logo-note" style="margin:.4rem 0 0"></div>
+
+      <h3 style="margin-top:1.2rem">Artwork</h3>
+      <div class="artgrid">
+        ${[["hero_url", "Hero banner", "the big crest across the top"],
+           ["badge_url", "Team badge", "the small mark beside each rep"],
+           ["logo_url", "Header logo", "a modest mark, if no hero"],
+           ["background_image_url", "Background", "texture behind the board"]]
+          .map(([token, label, note]) => `<div class="artslot">
+            <label>${label}</label>
+            <div class="hint" style="margin:0 0 .4rem">${note}</div>
+            <div class="artprev" id="prev-${token}"></div>
+            <input data-tok="${token}" placeholder="paste a URL" style="margin-top:.4rem">
+            <input type="file" data-upload="${token}" accept="image/png,image/jpeg,image/webp,image/gif" style="margin-top:.3rem">
+          </div>`).join("")}
+      </div>
+      <div class="hint" id="th-art-note" style="margin:.5rem 0 0"></div>
     </div>
     <div class="card"><h3>Readability</h3><div id="th-ratios"></div>
-      <div class="preview" id="th-prev"></div></div>`);
+      <div class="preview" id="th-prev"></div></div>
+    <div class="card"><h3>On the television</h3>
+      <div class="hint">The board's own page, scaled down. Updates when you save.</div>
+      <div class="boardwrap" id="th-board"></div></div>`);
 
   const readTokens = () => {
-    const values = { font: $("th-font").value };
+    const values = { font: $("th-font").value, frame: $("th-frame").value };
     $("view").querySelectorAll("[data-tok]").forEach(input => {
       if (input.value) values[input.dataset.tok] = input.value;
     });
@@ -489,7 +522,39 @@ views.theme = async () => {
          <span style="color:${r.muted}"> &nbsp;NET SPLIT</span></div>`;
   });
 
-  $("view").querySelectorAll("[data-tok], #th-font").forEach(input => input.oninput = refresh);
+  // A scaled iframe of the real board. It reflects saved themes, so it
+  // updates after Save rather than while colours are still being tried —
+  // which is what the contrast panel above is for.
+  function drawBoard() {
+    const target = $("th-target").value;
+    const team = target === "org"
+      ? "" : (teams.find(t => t.id === Number(target.split(":")[1]))?.name || "");
+    const query = team
+      ? `?mode=per_team&team=${encodeURIComponent(team)}&title=${encodeURIComponent(team.toUpperCase())}`
+      : "?mode=whole_office";
+    const wrap = $("th-board");
+    wrap.innerHTML = `<iframe src="/preview/live${query}" title="Board preview"></iframe>`;
+    const scale = () => {
+      const frame = wrap.querySelector("iframe");
+      if (frame) frame.style.transform = `scale(${wrap.clientWidth / 1600})`;
+    };
+    scale();
+    setTimeout(scale, 60);
+  }
+
+  function drawArtwork() {
+    $("view").querySelectorAll("[data-tok]").forEach(input => {
+      const slot = $("prev-" + input.dataset.tok);
+      if (!slot) return;
+      slot.innerHTML = input.value
+        ? `<img src="${esc(input.value)}" alt="">`
+        : `<span class="none">nothing set</span>`;
+    });
+  }
+
+  $("view").querySelectorAll("[data-tok], #th-font, #th-frame").forEach(input => {
+    input.oninput = () => { refresh(); drawArtwork(); };
+  });
   $("th-target").onchange = () => {
     const target = $("th-target").value;
     const found = target === "org"
@@ -498,15 +563,19 @@ views.theme = async () => {
     const merged = { ...catalogue.defaults, ...(found?.tokens || {}) };
     $("th-name").value = found?.name || "Brand";
     $("th-font").value = merged.font || "inter";
-    $("view").querySelectorAll("[data-tok]").forEach(i => { if (merged[i.dataset.tok]) i.value = merged[i.dataset.tok]; });
-    refresh();
+    $("th-frame").value = merged.frame || "none";
+    $("view").querySelectorAll("[data-tok]").forEach(i => {
+      i.value = merged[i.dataset.tok] ?? "";
+    });
+    refresh(); drawArtwork(); drawBoard();
   };
   $("th-target").onchange();
 
-  $("th-logo").onchange = () => guard(async () => {
-    const file = $("th-logo").files[0];
+  $("view").querySelectorAll("[data-upload]").forEach(input => input.onchange = () => guard(async () => {
+    const token = input.dataset.upload;
+    const file = input.files[0];
     if (!file) return;
-    $("th-logo-note").textContent = "Uploading…";
+    $("th-art-note").textContent = "Uploading…";
     // Sent as multipart rather than a data URL: the server decides what the
     // file is from its own bytes, and a base64 blob in a theme token would
     // travel with every board refresh.
@@ -516,18 +585,22 @@ views.theme = async () => {
       method: "POST", body, headers: { Authorization: "Bearer " + state.token },
     });
     const result = await response.json();
-    if (!response.ok) { $("th-logo-note").textContent = ""; throw new Error(describe(result.detail)); }
-    $("view").querySelector('[data-tok="logo_url"]').value = result.url;
-    $("th-logo-note").textContent = `Uploaded ${result.filename} (${Math.round(result.size_bytes / 1024)}KB). Save the theme to apply it.`;
+    if (!response.ok) { $("th-art-note").textContent = ""; throw new Error(describe(result.detail)); }
+    $("view").querySelector(`[data-tok="${token}"]`).value = result.url;
+    $("th-art-note").textContent =
+      `Uploaded ${result.filename} (${Math.round(result.size_bytes / 1024)}KB). Save the theme to put it on the board.`;
     refresh();
-  });
+  }));
 
   $("th-save").onclick = () => guard(async () => {
     const target = $("th-target").value;
     const path = target === "org" ? "/themes/org" : `/themes/team/${target.split(":")[1]}`;
     await api(path, { method: "PUT", body: JSON.stringify({ name: $("th-name").value, tokens: readTokens() }) });
     toast("Theme saved", "good");
+    drawBoard();
   });
+
+  window.addEventListener("resize", drawBoard);
 };
 
 views.screens = async () => {
@@ -615,18 +688,29 @@ views.screens = async () => {
   }
 
   onClick("[data-prev]", node => guard(async () => {
-    const data = await api(`/screens/${node.dataset.prev}/render`);
-    $("s-preview").innerHTML = `<div class="card"><h3>Preview: ${esc(data.screen.title)}</h3>
-      <div class="grid3">${(data.widgets || []).map(w => `<div class="card" style="background:var(--panel2)">
-        <label>${esc(w.label)}</label>
-        <div style="font-size:20px;font-weight:800;color:var(--accent)">${
-          w.type === "big_number" || w.type === "gauge" ? fmt(w.value, w.unit)
-          : w.type === "trend" ? (w.points.length + " days")
-          : (w.series || []).map(s => `${esc(s.label)} ${fmt(s.value, w.unit)}`).join("<br>")}</div>
-      </div>`).join("") || "<div class='hint'>No widgets on this screen.</div>"}</div>
-      ${data.widget_errors.length ? `<div style="color:#ff9a92;margin-top:.7rem">${
+    const id = node.dataset.prev;
+    // Show the television's own page rather than a summary of its numbers.
+    // A preview drawn separately drifts, and then it is showing something
+    // nobody will ever see on a wall.
+    const data = await api(`/screens/${id}/render`);
+    $("s-preview").innerHTML = `<div class="card">
+      <h3>${esc(data.screen.title)} &mdash; exactly what the television shows</h3>
+      <div class="boardwrap" id="s-frame"><iframe src="/preview/screen/${id}" title="Board preview"></iframe></div>
+      <div class="row" style="margin-top:.7rem">
+        <div class="hint" style="margin:0">${data.rep_count} reps &middot; ${data.widgets.length} widgets
+          &middot; ${data.columns.length} columns</div>
+        <div class="fixed"><a href="/preview/screen/${id}" target="_blank"><button class="sm">Open full size</button></a></div>
+      </div>
+      ${data.widget_errors.length ? `<div style="color:#ff9a92;margin-top:.6rem">${
         data.widget_errors.map(e => esc(e.error)).join("<br>")}</div>` : ""}
-      <div class="hint" style="margin-top:.8rem">${data.rep_count} reps &middot; theme font ${esc(data.theme.font)}</div></div>`;
+    </div>`;
+    const wrap = $("s-frame");
+    const scale = () => {
+      const frame = wrap.querySelector("iframe");
+      if (frame) frame.style.transform = `scale(${wrap.clientWidth / 1600})`;
+    };
+    scale(); setTimeout(scale, 60);
+    window.addEventListener("resize", scale);
   }));
 
   onClick("[data-delscreen]", node => guard(async () => {
@@ -662,7 +746,8 @@ views.displays = async () => {
         </select></td>
         <td class="l">${d.last_seen_at ? esc(d.last_seen_at.slice(0, 16).replace("T", " ")) : "never"}</td>
         <td>${d.revoked ? '<span class="pill off">revoked</span>'
-             : `<button class="sm danger" data-revoke="${d.id}">Revoke</button>`}</td>
+             : `<button class="sm" data-newlink="${d.id}">New link</button>
+                <button class="sm danger" data-revoke="${d.id}">Revoke</button>`}</td>
       </tr>`).join("") || `<tr><td class="l" colspan="4">No displays yet.</td></tr>`}</tbody>
     </table></div>`);
 
@@ -726,6 +811,21 @@ views.displays = async () => {
     await api(`/display-tokens/${select.dataset.attach}/screen`, { method: "POST",
       body: JSON.stringify({ screen_id: select.value ? Number(select.value) : null }) });
     toast("Display updated", "good");
+  }));
+
+  onClick("[data-newlink]", node => guard(async () => {
+    // The link is stored hashed and shown once, which is right until somebody
+    // closes the tab before writing it down. Without this the display would be
+    // unreachable for good.
+    if (!await confirmAsync("Issue a new link for this television? The current one stops working immediately.", "New link")) return;
+    const result = await api(`/display-tokens/${node.dataset.newlink}/regenerate`, { method: "POST" });
+    const url = location.origin + result.url;
+    $("view").insertAdjacentHTML("afterbegin",
+      `<div class="card" style="border-color:var(--good)">
+         <h3>New link for ${esc(result.name)}</h3>
+         <code>${esc(url)}</code>
+         <div class="hint" style="margin-top:.5rem">${esc(result.note)}</div>
+       </div>`);
   }));
 
   onClick("[data-revoke]", node => guard(async () => {
