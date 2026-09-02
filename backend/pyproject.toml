@@ -51,6 +51,11 @@ ignore = [
 # urlopen against a URL built from saved connection settings, not user input;
 # and a broad catch so one malformed Tableau response cannot end a refresh.
 "src/scoreboard/connectors/tableau.py" = ["S310", "BLE001"]
+# The URL comes from a saved source, and `_url` refuses anything that is not
+# http or https before the request is built.
+"src/scoreboard/connectors/rest.py" = ["S310"]
+# A hand-run stand-in for a customer API, not part of the application.
+"tests/fixtures/fake_api.py" = ["S104", "E501"]
 # Seeded RNG for demo figures. Nothing here is a secret.
 "src/scoreboard/connectors/mock.py" = ["S311"]
 # Constant *names* that look like secrets to a scanner; the values are

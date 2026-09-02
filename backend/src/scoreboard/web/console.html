@@ -211,6 +211,52 @@ h2 { font-size: 26px; font-weight: 600; letter-spacing: -.02em; margin-bottom: .
 .boardwrap iframe { position: absolute; inset: 0; width: 1600px; height: 900px; border: 0; transform-origin: 0 0; }
 
 /* A team's crest, shown wherever the team is named. */
+/* ---------------------------------------------------------------- home */
+/* Cards size to their content. Stretching every card to the tallest in its
+   row left a chart with four bars sitting in half a screen of nothing. */
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+         gap: 1.1rem; align-items: start; }
+.bars { display: flex; flex-direction: column; gap: .55rem; }
+.barrow { display: grid; grid-template-columns: 8.5rem 1fr auto; align-items: center; gap: .7rem; font-size: 14px; }
+.barrow .bl { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.barrow .bt { background: var(--sunken); border-radius: 999px; height: 9px; overflow: hidden; }
+.barrow .bf { display: block; height: 100%; border-radius: 999px; }
+.barrow .bv { font-weight: 600; font-size: 13.5px; }
+.donutwrap { display: flex; gap: 1.2rem; align-items: center; flex-wrap: wrap; }
+.donutwrap .legend { display: flex; flex-direction: column; gap: .3rem; font-size: 13.5px; }
+.donutwrap .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: .45rem; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .9rem; }
+.stat { background: var(--sunken); border-radius: var(--r-sm); padding: .85rem 1rem; }
+.stat .k { font-size: 13px; color: var(--muted); margin-bottom: .1rem; }
+.stat .v { font-size: 22px; font-weight: 600; letter-spacing: -.02em; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 1rem; }
+.tile {
+  background: var(--card); border: 1px solid var(--line-soft); border-radius: var(--r);
+  padding: 1.2rem; box-shadow: var(--shadow); cursor: pointer; text-align: left;
+  display: flex; flex-direction: column; gap: .45rem; width: 100%;
+  transition: transform .12s ease, box-shadow .15s ease, border-color .15s ease;
+}
+.tile:hover { transform: translateY(-2px); box-shadow: 0 2px 4px rgba(0,0,0,.06), 0 14px 34px rgba(0,0,0,.09); border-color: var(--line); }
+.tile:active { transform: translateY(0) scale(.99); }
+.tile .ic {
+  width: 40px; height: 40px; border-radius: 11px; background: var(--accent-soft);
+  color: var(--accent); display: flex; align-items: center; justify-content: center; margin-bottom: .2rem;
+}
+.tile .ic svg { width: 21px; height: 21px; }
+.tile .t { font-size: 16px; font-weight: 600; letter-spacing: -.01em; }
+.tile .d { font-size: 13.5px; color: var(--muted); line-height: 1.4; }
+.tile .n { margin-top: auto; padding-top: .5rem; font-size: 13px; color: var(--muted); }
+.tile .n b { color: var(--text); font-weight: 600; }
+
+.hero-card {
+  background: linear-gradient(180deg, #ffffff, #fbfbfd);
+  border: 1px solid var(--line-soft); border-radius: var(--r);
+  padding: 1.5rem 1.6rem; margin-bottom: 1.2rem; box-shadow: var(--shadow);
+  display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; flex-wrap: wrap;
+}
+.hero-card .big { font-size: 30px; font-weight: 600; letter-spacing: -.02em; }
+.tvlist { display: flex; gap: .5rem; flex-wrap: wrap; }
+
 .crest { height: 26px; width: 26px; object-fit: contain; vertical-align: middle; margin-right: .55rem; flex: none; }
 .crest.blank { border-radius: 6px; display: inline-block; }
 .teamname { display: flex; align-items: center; }
@@ -249,7 +295,7 @@ h2 { font-size: 26px; font-weight: 600; letter-spacing: -.02em; margin-bottom: .
 const state = {
   token: localStorage.getItem("sb_token") || "",
   me: null,
-  tab: "board",
+  tab: "home",
   cache: {},
 };
 
@@ -257,6 +303,7 @@ const RANK = { viewer: 0, team_lead: 1, branch_manager: 2, org_admin: 3, owner: 
 const can = (minimum) => state.me && RANK[state.me.role] >= RANK[minimum];
 
 const TABS = [
+  { key: "home",      label: "Home",      min: "viewer" },
   { key: "board",     label: "Board",     min: "viewer" },
   { key: "teams",     label: "Teams",     min: "viewer" },
   { key: "people",    label: "People",    min: "viewer" },
@@ -352,9 +399,15 @@ async function start() {
     `<div class="pill">${esc(state.me.role)}</div>`;
 
   const visible = TABS.filter(t => can(t.min));
-  if (!visible.some(t => t.key === state.tab)) state.tab = visible[0].key;
+  //  is a detail page reached from the Teams list, not a destination of
+  // its own, so it never appears in the sidebar but must not be reset either.
+  if (state.tab !== "team" && !visible.some(t => t.key === state.tab)) {
+    state.tab = visible[0].key;
+  }
   $("nav").innerHTML = visible
-    .map(t => `<button data-tab="${t.key}" class="${t.key === state.tab ? "on" : ""}">${t.label}</button>`)
+    .map(t => `<button data-tab="${t.key}" class="${
+        t.key === state.tab || (state.tab === "team" && t.key === "teams") ? "on" : ""
+      }">${t.label}</button>`)
     .join("");
   $("nav").querySelectorAll("button").forEach(b =>
     b.onclick = () => { state.tab = b.dataset.tab; start(); });
@@ -428,6 +481,254 @@ async function guard(action) {
 // ---------------------------------------------------------------- views
 const views = {};
 
+// Line icons, drawn inline. Four external requests for four small pictures is
+// four things that can fail on a machine with no internet, which is where
+// some of these installations live.
+const ICONS = {
+  board: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 5-7"/></svg>',
+  teams: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/></svg>',
+  people: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5"/><path d="M16 5.2a3.2 3.2 0 010 5.6M18 14.9c2 .7 3.5 2.5 3.5 5.1"/></svg>',
+  theme: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 000 18c1.4 0 2-1 2-2 0-1.6 1-2 2.5-2H18a3 3 0 003-3c0-4.5-4-8-9-8z"/><circle cx="7.5" cy="11" r="1.1" fill="currentColor" stroke="none"/><circle cx="11" cy="7.5" r="1.1" fill="currentColor" stroke="none"/><circle cx="15.5" cy="9" r="1.1" fill="currentColor" stroke="none"/></svg>',
+  screens: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>',
+  displays: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5" width="19" height="13" rx="2"/><path d="M7 2.5l5 2.5 5-2.5"/></svg>',
+  access: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10.5" width="16" height="10" rx="2"/><path d="M8 10.5V7a4 4 0 018 0v3.5"/></svg>',
+  data: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="6" rx="7.5" ry="3"/><path d="M4.5 6v6c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3V6"/><path d="M4.5 12v6c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3v-6"/></svg>',
+  audit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4"/><path d="M9.5 12h6M9.5 16h4"/></svg>',
+};
+
+
+// Charts drawn as inline SVG. The same numbers the television gets, from the
+// same builder, so a team page can never quietly disagree with the wall.
+function chartBar(widget, colour, colours) {
+  const series = widget.series || [];
+  if (!series.length) return `<div class="hint">Nothing to show yet.</div>`;
+  const max = Math.max(...series.map(s => s.value), 1);
+  return `<div class="bars">${series.map((s, i) => `
+    <div class="barrow">
+      <span class="bl">${esc(s.label)}</span>
+      <span class="bt"><span class="bf" style="width:${Math.max(s.value / max * 100, 1.5).toFixed(1)}%;background:${
+        (colours && colours[i]) || colour || "#0071e3"}"></span></span>
+      <span class="bv">${fmt(s.value, widget.unit)}</span>
+    </div>`).join("")}</div>`;
+}
+
+function chartDonut(widget, palette) {
+  const series = widget.series || [];
+  const total = series.reduce((sum, s) => sum + s.value, 0);
+  if (!total) return `<div class="hint">Nothing sold yet this period.</div>`;
+
+  const r = 42, c = 2 * Math.PI * r;
+  let offset = 0;
+  const arcs = series.map((s, i) => {
+    const fraction = s.value / total;
+    const arc = `<circle cx="60" cy="60" r="${r}" fill="none" stroke="${palette[i % palette.length]}"
+        stroke-width="20" stroke-dasharray="${(fraction * c).toFixed(2)} ${c.toFixed(2)}"
+        stroke-dashoffset="${(-offset * c).toFixed(2)}" transform="rotate(-90 60 60)"/>`;
+    offset += fraction;
+    return arc;
+  }).join("");
+
+  return `<div class="donutwrap">
+    <svg viewBox="0 0 120 120" width="128" height="128">${arcs}</svg>
+    <div class="legend">${series.map((s, i) => `
+      <div><i style="background:${palette[i % palette.length]}"></i>${esc(s.label)}
+        <span class="hint" style="margin:0">${(s.value / total * 100).toFixed(0)}%</span></div>`).join("")}
+    </div></div>`;
+}
+
+function sparkline(points, colour) {
+  if (!points || points.length < 2) {
+    return `<div class="hint">One capture so far &mdash; a trend needs a second day.</div>`;
+  }
+  const values = points.map(p => Number(p.value) || 0);
+  const min = Math.min(...values), max = Math.max(...values), span = (max - min) || 1;
+  const coords = values.map((v, i) => `${(i / (values.length - 1) * 100).toFixed(2)},${(38 - (v - min) / span * 34).toFixed(2)}`);
+  return `<svg viewBox="0 0 100 40" preserveAspectRatio="none" style="width:100%;height:70px">
+    <polyline points="${coords.join(" ")}" fill="none" stroke="${colour}" stroke-width="1.8" vector-effect="non-scaling-stroke"/>
+  </svg>`;
+}
+
+views.team = async () => {
+  const id = state.teamId;
+  const [data, { themes }] = await Promise.all([api(`/teams/${id}/stats`), api("/themes")]);
+  const tokens = themes.find(t => t.scope === "team" && t.team_id === Number(id))?.tokens || {};
+  const colour = tokens.primary || "#0071e3";
+  const palette = [colour, "#f59e0b", "#22c55e", "#a855f7", "#06b6d4", "#ef4444", "#84cc16", "#8b8d93"];
+
+  const crest = tokens.badge_url
+    ? `<img class="crest" style="height:34px;width:34px" src="${esc(tokens.badge_url)}" alt="">`
+    : `<span class="crest blank" style="height:34px;width:34px;background:${colour}"></span>`;
+
+  const kpi = (key) => `<div class="stat">
+      <div class="k">${esc(data.metric_labels[key] || key)}</div>
+      <div class="v">${fmt(data.totals[key], data.metric_kinds[key])}</div>
+      ${data.share_of_office[key] !== undefined
+        ? `<div class="hint" style="margin:.15rem 0 0">${data.share_of_office[key].toFixed(1)}% of the office</div>` : ""}
+    </div>`;
+
+  const bars = data.widgets.filter(w => w.type === "bar");
+  const donut = data.widgets.find(w => w.type === "donut");
+
+  section(
+    data.team.name,
+    `${data.member_count} ${data.member_count === 1 ? "person" : "people"} &middot; ${data.period.start} to ${data.period.end}`,
+    `<div class="hero-card">
+       <div style="display:flex;align-items:center;gap:.9rem">
+         ${crest}
+         <div>
+           <div class="big" style="font-size:24px">${esc(data.team.name)}</div>
+           <div class="hint" style="margin:0">${data.team.lead_name
+             ? esc(data.team.lead_name) + " &middot; " + esc(data.team.lead_role)
+             : "No team lead set"}</div>
+         </div>
+       </div>
+       <div class="tvlist">
+         <button class="sm" id="t-back">All teams</button>
+         <button class="sm" id="t-theme">Edit theme</button>
+         <a href="/preview/live?mode=per_team&team=${encodeURIComponent(data.team.name)}&title=${encodeURIComponent(data.team.name.toUpperCase())}" target="_blank">
+           <button class="sm primary">Open board</button></a>
+       </div>
+     </div>
+
+     <div class="card"><div class="stats">
+       ${["issued_leads", "pitched_leads", "sold_leads", "close_rate", "gross_split", "net_split", "dpl", "avg_gross_sale"]
+         .map(kpi).join("")}
+     </div></div>
+
+     <div class="grid2">
+       ${bars.map(w => `<div class="card"><h3>${esc(w.label)}</h3>${chartBar(w, colour)}</div>`).join("")}
+       ${donut ? `<div class="card"><h3>${esc(donut.label)}</h3>${chartDonut(donut, palette)}</div>` : ""}
+       <div class="card"><h3>Net split, day by day</h3>${sparkline(data.trend, colour)}</div>
+     </div>
+
+     <div class="card"><h3>The team</h3><table>
+       <thead><tr><th>#</th><th class="l">Rep</th><th>Issued</th><th>Sold</th><th>Close</th><th>Gross</th><th>Net</th><th>DPL</th></tr></thead>
+       <tbody>${data.reps.map(r => `<tr>
+         <td>${r.rank}</td><td class="l"><b>${esc(r.rep_name)}</b></td>
+         <td>${fmt(r.issued_leads, "number")}</td><td>${fmt(r.sold_leads, "number")}</td>
+         <td>${fmt(r.close_rate, "percent")}</td><td>${fmt(r.gross_split, "currency")}</td>
+         <td>${fmt(r.net_split, "currency")}</td><td>${fmt(r.dpl, "currency")}</td>
+       </tr>`).join("") || `<tr><td class="l" colspan="8">Nobody is assigned to this team yet.</td></tr>`}</tbody>
+       <tfoot><tr><td></td><td class="l">Total</td>
+         <td>${fmt(data.totals.issued_leads, "number")}</td><td>${fmt(data.totals.sold_leads, "number")}</td>
+         <td>${fmt(data.totals.close_rate, "percent")}</td><td>${fmt(data.totals.gross_split, "currency")}</td>
+         <td>${fmt(data.totals.net_split, "currency")}</td><td>${fmt(data.totals.dpl, "currency")}</td>
+       </tr></tfoot>
+     </table></div>`
+  );
+
+  $("t-back").onclick = () => { state.tab = "teams"; start(); };
+  $("t-theme").onclick = () => { state.themeTarget = "team:" + id; state.tab = "theme"; start(); };
+};
+
+views.home = async () => {
+  const [me, data, { screens }, { displays }] = await Promise.all([
+    api("/auth/me"),
+    api("/overview"),
+    api("/screens"),
+    can("branch_manager") ? api("/display-tokens") : Promise.resolve({ displays: [] }),
+  ]);
+
+  const tiles = [
+    ["board", "Live board", "Current standings, exactly as ranked", `<b>${data.rep_count}</b> reps`, "viewer"],
+    ["teams", "Teams", "Structure, leads, and each team's own look", `<b>${data.standings.length}</b> teams`, "viewer"],
+    ["people", "People", "Who sits on which team", `<b>${data.rep_count}</b> on the board`, "viewer"],
+    ["theme", "Brand", "Colours, artwork and fonts", "organization &amp; teams", "team_lead"],
+    ["screens", "Screens", "What a television shows, and its charts", `<b>${screens.length}</b> screens`, "viewer"],
+    ["displays", "Displays", "Televisions and their links", `<b>${displays.filter(d => !d.revoked).length}</b> active`, "branch_manager"],
+    ["access", "Access", "Who can sign in, and as what", "accounts and roles", "org_admin"],
+    ["data", "Data", "Where the numbers come from", "sources and API keys", "org_admin"],
+    ["audit", "Audit", "Who changed what, and when", "recent activity", "org_admin"],
+  ].filter(([, , , , min]) => can(min));
+
+  const palette = data.standings.map(t => t.colour || "#0071e3");
+  const bars = data.widgets.filter(w => w.type === "bar");
+  const donuts = data.widgets.filter(w => w.type === "donut");
+  const leaders = data.widgets.find(w => w.type === "leaders");
+
+  // Charts are coloured by the team they describe, so a slice and the crest
+  // beside its name are recognisably the same team.
+  const teamColour = (label) =>
+    data.standings.find(t => t.team === label)?.colour || "#8b8d93";
+  const byTeam = (widget) => (widget.series || []).map(s => teamColour(s.label));
+
+  const kpi = (key) => `<div class="stat">
+      <div class="k">${esc(data.metric_labels[key] || key)}</div>
+      <div class="v">${fmt(data.totals[key], data.metric_kinds[key])}</div>
+    </div>`;
+
+  const money = (n) => "$" + Math.round(Number(n) || 0).toLocaleString("en-US");
+
+  section(
+    `Hello, ${esc(me.organization?.name || "there")}`,
+    `${data.period.start} to ${data.period.end} &middot; everything this company can set up, in one place.`,
+    `<div class="hero-card">
+       <div>
+         <div class="hint" style="margin:0 0 .2rem">Net split this period</div>
+         <div class="big">${money(data.totals.net_split)}</div>
+         <div class="hint" style="margin:.2rem 0 0">${data.rep_count} reps &middot; ${data.standings.length} teams</div>
+       </div>
+       <div>
+         <div class="hint" style="margin:0 0 .4rem">Open a board</div>
+         <div class="tvlist">
+           ${screens.slice(0, 4).map(sc =>
+             `<a href="/preview/screen/${sc.id}" target="_blank"><button class="sm">${esc(sc.name)}</button></a>`
+           ).join("") || '<span class="hint" style="margin:0">No screens yet.</span>'}
+         </div>
+       </div>
+     </div>
+
+     <div class="card"><div class="stats">
+       ${["issued_leads", "pitched_leads", "sold_leads", "close_rate", "gross_split", "net_split", "dpl", "sales_retention"]
+         .map(kpi).join("")}
+     </div></div>
+
+     <h3 style="margin:1.6rem 0 .8rem;font-size:19px;font-weight:600;letter-spacing:-.01em">How the teams compare</h3>
+     <div class="grid2">
+       ${bars.map(w => `<div class="card"><h3>${esc(w.label)}</h3>${chartBar(w, null, byTeam(w))}</div>`).join("")}
+       ${donuts.map(w => `<div class="card"><h3>${esc(w.label)}</h3>${chartDonut(w, byTeam(w))}</div>`).join("")}
+       ${leaders ? `<div class="card"><h3>${esc(leaders.label)}</h3>${chartBar(leaders, "#0071e3")}</div>` : ""}
+       <div class="card"><h3>Net split, day by day</h3>${sparkline(data.trend, "#0071e3")}</div>
+     </div>
+
+     <div class="card"><h3>Standings</h3><table>
+       <thead><tr><th>#</th><th class="l">Team</th><th class="l">MVP</th><th>People</th>
+         <th>Issued</th><th>Sold</th><th>Close</th><th>Gross</th><th>Net</th><th>DPL</th></tr></thead>
+       <tbody>${data.standings.map(t => `<tr>
+         <td>${t.rank}</td>
+         <td class="l"><button class="ghost" data-open="${t.team_id ?? ""}" style="padding:.2rem .3rem">
+           <span class="teamname">${t.badge_url
+             ? `<img class="crest" src="${esc(t.badge_url)}" alt="">`
+             : `<span class="crest blank" style="background:${t.colour}"></span>`}<b>${esc(t.team)}</b></span></button></td>
+         <td class="l">${esc(t.mvp) || "&mdash;"}</td>
+         <td>${t.rep_count}</td>
+         <td>${fmt(t.issued_leads, "number")}</td><td>${fmt(t.sold_leads, "number")}</td>
+         <td>${fmt(t.close_rate, "percent")}</td><td>${fmt(t.gross_split, "currency")}</td>
+         <td>${fmt(t.net_split, "currency")}</td><td>${fmt(t.dpl, "currency")}</td>
+       </tr>`).join("") || `<tr><td class="l" colspan="10">No teams yet.</td></tr>`}</tbody>
+     </table></div>
+
+     <h3 style="margin:1.6rem 0 .8rem;font-size:19px;font-weight:600;letter-spacing:-.01em">Set things up</h3>
+     <div class="tiles">
+       ${tiles.map(([key, title, description, note]) => `
+         <button class="tile" data-go="${key}">
+           <span class="ic">${ICONS[key]}</span>
+           <span class="t">${title}</span>
+           <span class="d">${description}</span>
+           <span class="n">${note}</span>
+         </button>`).join("")}
+     </div>`
+  );
+
+  onClick("[data-go]", node => { state.tab = node.dataset.go; start(); });
+  onClick("[data-open]", node => {
+    if (!node.dataset.open) return;
+    state.teamId = node.dataset.open;
+    state.tab = "team";
+    start();
+  });
+};
+
 views.board = async () => {
   const data = await api("/board?mode=whole_office&rank_by=net_split");
   const columns = ["rank", "rep_name", "team", "issued_leads", "sold_leads", "close_rate", "gross_split", "net_split", "dpl"];
@@ -451,7 +752,12 @@ views.teams = async () => {
   const [{ teams }, { reps }, { themes }] = await Promise.all([
     api("/teams"), api("/reps"), api("/themes")]);
   state.cache.teams = teams;
-  const count = (id) => reps.filter(r => r.team_id === id).length;
+  // Count who is *shown* on the team, not only who was moved there by hand.
+  // Most people arrive on a team through the source and are never reassigned;
+  // reporting them as zero members beside a board that plainly shows them is
+  // the console contradicting itself.
+  const count = (team) => reps.filter(r => r.team === team.name).length;
+  const assigned = (team) => reps.filter(r => r.team_id === team.id).length;
   const editable = state.me.editable_team_ids;
   const mayEdit = (id) => editable === null || (editable || []).includes(id);
 
@@ -472,10 +778,12 @@ views.teams = async () => {
           ? `<img class="crest" src="${esc(art.badge_url)}" alt="">`
           : `<span class="crest blank" style="background:${esc(art.primary || "#d8d8dd")}"></span>`;
         return `<tr>
-          <td class="l"><span class="teamname">${crest}<b>${esc(t.name)}</b></span></td>
+          <td class="l"><button class="ghost" data-open="${t.id}" style="padding:.2rem .3rem">
+            <span class="teamname">${crest}<b>${esc(t.name)}</b></span></button></td>
           <td class="l">${esc(t.lead_name) || '<span class="pill">none</span>'}
               ${t.lead_name ? `<span class="pill">${esc(t.lead_role)}</span>` : ""}</td>
-          <td>${count(t.id)}</td>
+          <td>${count(t)}${assigned(t) && assigned(t) !== count(t)
+            ? ` <span class="pill">${assigned(t)} moved here</span>` : ""}</td>
           <td>${mayEdit(t.id) ? `<button class="sm" data-theme="${t.id}">Theme</button>
                                  <button class="sm" data-edit="${t.id}">Edit</button>` : ""}
               ${can("org_admin") ? `<button class="sm danger" data-del="${t.id}">Delete</button>` : ""}</td>
@@ -485,6 +793,12 @@ views.teams = async () => {
 
   // A team's look belongs beside the team, not in a separate menu where you
   // first have to remember which of five dropdowns picks the one you meant.
+  onClick("[data-open]", node => {
+    state.teamId = node.dataset.open;
+    state.tab = "team";
+    start();
+  });
+
   onClick("[data-theme]", node => {
     state.themeTarget = "team:" + node.dataset.theme;
     state.tab = "theme";
@@ -1039,35 +1353,89 @@ views.access = async () => {
   }));
 };
 
+// Fields the platform understands, and the words a person filling in the
+// mapping screen would use for them.
+const MAPPABLE = [
+  ["rep_name", "Name", "required"],
+  ["rep_key", "Unique id", "falls back to the name"],
+  ["team", "Team", ""],
+  ["home_branch", "Branch or office", ""],
+  ["title", "Job title", ""],
+  ["issued_leads", "Issued leads", ""],
+  ["pitched_leads", "Pitched leads", ""],
+  ["sold_leads", "Sold leads", ""],
+  ["gross_split", "Gross", ""],
+  ["pending_split", "Pending", ""],
+  ["net_split", "Net", ""],
+];
+
+// A first guess, so most of the form is already filled in. Wrong guesses are
+// visible and one click to change; an empty form is eleven decisions.
+function guessField(target, fields) {
+  const norm = (s) => String(s).toLowerCase().replace(/[^a-z]/g, "");
+  const wanted = {
+    rep_name: ["name", "fullname", "rep", "salesrep", "employee"],
+    rep_key: ["id", "employeeid", "repid", "code", "key"],
+    team: ["team", "crew", "squad", "group"],
+    home_branch: ["branch", "office", "location", "market"],
+    title: ["title", "role", "position"],
+    issued_leads: ["issued", "leadsissued", "issuedleads", "assigned"],
+    pitched_leads: ["pitched", "leadspitched", "pitchedleads", "presented"],
+    sold_leads: ["sold", "deals", "closed", "sales", "soldleads"],
+    gross_split: ["gross", "grosssplit", "grosssales", "revenue"],
+    pending_split: ["pending", "pendingsplit"],
+    net_split: ["net", "netsplit", "netsales"],
+  }[target] || [];
+
+  for (const candidate of wanted) {
+    const hit = fields.find(f => norm(f.field) === candidate);
+    if (hit) return hit.field;
+  }
+  for (const candidate of wanted) {
+    const hit = fields.find(f => norm(f.field).includes(candidate));
+    if (hit) return hit.field;
+  }
+  return "";
+}
+
 views.data = async () => {
   const [{ sources, available }, { keys }] = await Promise.all([api("/sources"), api("/api-keys")]);
-  section("Data", "Pull from a system we can reach, or let the customer push to us. Credentials are encrypted and never returned.", `
-    <div class="card"><h3>Add a source</h3><div class="row">
-      <div><label>Kind</label><select id="src-kind">${available.map(c =>
-        `<option value="${c.kind}">${esc(c.label)}${c.pullable ? "" : " (push)"}</option>`).join("")}</select></div>
-      <div><label>Name</label><input id="src-name" placeholder="Tableau — Rep Totals"></div>
-      <div><label>Secret (PAT)</label><input id="src-secret" type="password" placeholder="only for pull sources"></div>
-      <div class="fixed"><button class="primary" id="src-add">Add</button></div>
+  const kinds = Object.fromEntries(available.map(c => [c.kind, c]));
+
+  section("Data", "Where the numbers come from. Pull from a system we can reach, or let the customer push to us. Credentials are encrypted and never returned.", `
+    <div class="card"><h3>Add a source</h3>
+      <div class="row">
+        <div><label>Kind</label><select id="src-kind">${available.map(c =>
+          `<option value="${c.kind}">${esc(c.label)}${c.pullable ? "" : " — they push to us"}</option>`).join("")}</select></div>
+        <div><label>Name</label><input id="src-name" placeholder="Northgate CRM"></div>
+        <div class="fixed"><button class="primary" id="src-add">Add</button></div>
+      </div>
+      <div id="src-fields" style="margin-top:.9rem"></div>
     </div>
-    <div style="margin-top:.7rem"><label>Config (JSON)</label>
-      <textarea id="src-config" rows="4" placeholder='{"server":"https://…","site":"…","pat_name":"…","workbook":"…","view":"…"}'></textarea></div>
-    </div>
+
     <div class="card"><table>
       <thead><tr><th class="l">Source</th><th class="l">Kind</th><th class="l">Last run</th><th class="l">Status</th><th></th></tr></thead>
       <tbody>${sources.map(s => `<tr>
-        <td class="l"><b>${esc(s.name)}</b> ${s.has_secret ? '<span class="pill on">secret set</span>' : ""}</td>
-        <td class="l">${esc(s.kind)}</td>
+        <td class="l"><b>${esc(s.name)}</b> ${s.has_secret ? '<span class="pill on">secret set</span>' : ""}
+          ${Object.keys(s.config.mapping || {}).length
+            ? `<span class="pill">${Object.keys(s.config.mapping).length} fields mapped</span>`
+            : (kinds[s.kind]?.pullable && s.kind !== "mock" ? '<span class="pill off">not mapped</span>' : "")}</td>
+        <td class="l">${esc(kinds[s.kind]?.label || s.kind)}</td>
         <td class="l">${s.last_run_at ? esc(s.last_run_at.slice(0, 16).replace("T", " ")) : "never"}</td>
         <td class="l">${esc(s.last_status)}</td>
-        <td><button class="sm" data-test="${s.id}">Test</button>
+        <td>${s.kind === "rest" ? `<button class="sm" data-map="${s.id}">Map fields</button>` : ""}
+            <button class="sm" data-test="${s.id}">Test</button>
             <button class="sm" data-refresh="${s.id}">Refresh</button>
             <button class="sm danger" data-delsrc="${s.id}">Delete</button></td>
       </tr>`).join("") || `<tr><td class="l" colspan="5">No sources yet.</td></tr>`}</tbody>
     </table></div>
+
     <div class="card"><h3>Ingest API keys</h3>
+      <div class="hint" style="margin-bottom:.8rem">For a system we cannot reach: their IT posts rows to
+        <code>POST /api/v1/ingest/reps</code> with one of these.</div>
       <div class="row"><div><label>Name</label><input id="k-name" placeholder="Customer IT push"></div>
         <div class="fixed"><button class="primary" id="k-add">Create key</button></div></div>
-      <table style="margin-top:.8rem">
+      <table style="margin-top:.9rem">
         <thead><tr><th class="l">Key</th><th class="l">Last used</th><th></th></tr></thead>
         <tbody>${keys.map(k => `<tr>
           <td class="l"><b>${esc(k.name)}</b> <code>${esc(k.prefix)}…</code></td>
@@ -1077,18 +1445,80 @@ views.data = async () => {
         </tr>`).join("") || `<tr><td class="l" colspan="3">No keys yet.</td></tr>`}</tbody>
       </table></div>`);
 
+  // Each kind asks for what it actually needs, rather than one JSON box for
+  // everything. A raw config field is a form that only its author can fill in.
+  const FORMS = {
+    rest: `<div class="row">
+        <div><label>URL</label><input id="f-url" placeholder="https://crm.example.com/api/sales"></div>
+        <div><label>Records path</label><input id="f-path" placeholder="data.reps"></div>
+        <div><label>Token (optional)</label><input id="f-secret" type="password" placeholder="sent as a bearer token"></div>
+      </div>
+      <div class="hint" style="margin:.5rem 0 0">Records path is where the list of people sits in the reply. Leave it empty if the reply is already a list.</div>`,
+    tableau: `<div class="row">
+        <div><label>Server</label><input id="f-server" placeholder="https://10ay.online.tableau.com"></div>
+        <div><label>Site</label><input id="f-site"></div>
+        <div><label>Token name</label><input id="f-pat"></div>
+      </div>
+      <div class="row" style="margin-top:.6rem">
+        <div><label>Workbook</label><input id="f-workbook"></div>
+        <div><label>View</label><input id="f-view"></div>
+        <div><label>Token secret</label><input id="f-secret" type="password"></div>
+      </div>`,
+    ingest: `<div class="hint" style="margin:0">Nothing to configure. Create an API key below and give it to whoever will push the data.</div>`,
+    mock: `<div class="hint" style="margin:0">Generated figures, for trying the board out.</div>`,
+  };
+
+  const drawForm = () => { $("src-fields").innerHTML = FORMS[$("src-kind").value] || ""; };
+  $("src-kind").onchange = drawForm;
+  drawForm();
+
   $("src-add").onclick = () => guard(async () => {
-    let config = {};
-    const raw = $("src-config").value.trim();
-    if (raw) {
-      try { config = JSON.parse(raw); }
-      catch { throw new Error("Config is not valid JSON."); }
-    }
+    const kind = $("src-kind").value;
+    const value = (id) => ($(id) ? $(id).value.trim() : "");
+    const config = kind === "rest"
+      ? { url: value("f-url"), records_path: value("f-path") }
+      : kind === "tableau"
+      ? { server: value("f-server"), site: value("f-site"), pat_name: value("f-pat"),
+          workbook: value("f-workbook"), view: value("f-view") }
+      : {};
     await api("/sources", { method: "POST", body: JSON.stringify({
-      kind: $("src-kind").value, name: $("src-name").value.trim() || "Source",
-      config, secret: $("src-secret").value }) });
-    toast("Source added", "good"); render();
+      kind, name: $("src-name").value.trim() || "Source", config, secret: value("f-secret") }) });
+    toast(kind === "rest" ? "Source added. Map its fields next." : "Source added", "good");
+    render();
   });
+
+  onClick("[data-map]", node => guard(async () => {
+    const id = node.dataset.map;
+    const found = await api(`/sources/${id}/discover`, { method: "POST" });
+    const source = sources.find(s => String(s.id) === String(id));
+    const saved = source.config.mapping || {};
+
+    dialog(`Map ${esc(source.name)}`, `
+      <div class="hint" style="margin:0 0 .6rem">${found.records} records, ${found.fields.length} fields.
+        Guesses are filled in; change anything that is wrong.</div>
+      ${MAPPABLE.map(([target, label, note]) => {
+        const current = saved[target] || guessField(target, found.fields);
+        return `<div class="moverow">
+          <span>${label}${note ? ` <span class="hint" style="margin:0">${note}</span>` : ""}</span>
+          <select data-m="${target}">
+            <option value="">— not used —</option>
+            ${found.fields.map(f => `<option value="${esc(f.field)}" ${f.field === current ? "selected" : ""}
+              >${esc(f.field)}${f.looks_numeric ? " (number)" : ""}</option>`).join("")}
+          </select></div>`;
+      }).join("")}`,
+      async (close) => {
+        const mapping = {};
+        $("modal").querySelectorAll("[data-m]").forEach(select => {
+          if (select.value) mapping[select.dataset.m] = select.value;
+        });
+        if (!mapping.rep_name) throw new Error("Map a field to Name — without one there is nobody to rank.");
+        await api(`/sources/${id}`, { method: "PATCH",
+          body: JSON.stringify({ config: { ...source.config, mapping } }) });
+        close();
+        toast(`Mapped ${Object.keys(mapping).length} fields. Refresh to pull.`, "good");
+        render();
+      }, "Save mapping");
+  }));
 
   onClick("[data-test]", node => guard(async () => {
     const result = await api(`/sources/${node.dataset.test}/test`, { method: "POST" });
@@ -1101,7 +1531,7 @@ views.data = async () => {
   }));
 
   onClick("[data-delsrc]", node => guard(async () => {
-    if (!await confirmAsync("Delete this source and its stored credential?\nNumbers it already loaded stay on the board.")) return;
+    if (!await confirmAsync("Delete this source?\nIts stored credential goes with it. Numbers it already loaded stay on the board.", "Delete")) return;
     await api(`/sources/${node.dataset.delsrc}/delete`, { method: "POST" });
     toast("Source deleted", "good"); render();
   }));
@@ -1117,7 +1547,7 @@ views.data = async () => {
   });
 
   onClick("[data-krevoke]", node => guard(async () => {
-    if (!await confirmAsync("Revoke this key? Anything pushing with it stops immediately.")) return;
+    if (!await confirmAsync("Revoke this key? Anything pushing with it stops immediately.", "Revoke")) return;
     await api(`/api-keys/${node.dataset.krevoke}/revoke`, { method: "POST" });
     toast("Revoked", "good"); render();
   }));

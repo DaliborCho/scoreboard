@@ -830,3 +830,24 @@ def change_password(
     session.commit()
 
     return {"ok": True, "other_sessions_ended": max(revoked - 1, 0), "kept_session": keep}
+
+
+@router.post("/sources/{source_id}/discover")
+def discover_source(
+    source_id: int,
+    _: AuthContext = Depends(require_role(Role.org_admin)),
+    scope: TenantScope = Depends(user_scope),
+) -> dict:
+    """Ask a source what it actually returns.
+
+    The mapping screen is filled in from this rather than from what somebody
+    remembers the endpoint returning, which is how a column gets mapped to a
+    field that quietly stopped existing.
+    """
+    source = scope.get(DataSource, source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Source not found.")
+    try:
+        return _connector_for(scope, source).discover()
+    except SourceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc

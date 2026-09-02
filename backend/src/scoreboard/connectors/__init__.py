@@ -13,12 +13,14 @@ from scoreboard.connectors.base import (
 )
 from scoreboard.connectors.ingest import IngestConnector
 from scoreboard.connectors.mock import MockConnector
+from scoreboard.connectors.rest import RestConnector
 from scoreboard.connectors.tableau import TableauConnector
 
 REGISTRY: dict[str, type[Connector]] = {
     MockConnector.kind: MockConnector,
     IngestConnector.kind: IngestConnector,
     TableauConnector.kind: TableauConnector,
+    RestConnector.kind: RestConnector,
 }
 
 

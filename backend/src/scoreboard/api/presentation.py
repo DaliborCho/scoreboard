@@ -15,6 +15,7 @@ from scoreboard.db import get_session
 from scoreboard.domain import charts
 from scoreboard.domain import theme as theme_domain
 from scoreboard.domain.leaderboard import MODES
+from scoreboard.domain.theme import resolve
 from scoreboard.models import DisplayToken, Role, Screen, Team, Theme
 from scoreboard.security import generate_token
 from scoreboard.services import audit
@@ -394,4 +395,133 @@ def regenerate_display_token(
         "name": display.name,
         "url": f"/tv/{token}",
         "note": "The previous link stopped working. Shown once.",
+    }
+
+
+@router.get("/teams/{team_id}/stats")
+def team_stats(
+    team_id: int,
+    scope: TenantScope = Depends(user_scope),
+) -> dict:
+    """One team's figures, its people, and charts of both.
+
+    The same roll-up and the same chart builder the television uses, so a team
+    page in the console can never quietly disagree with the board on the wall.
+    """
+    from scoreboard.connectors.base import Period
+    from scoreboard.domain import charts as chart_domain
+    from scoreboard.domain.leaderboard import UNASSIGNED, rank
+    from scoreboard.domain.metrics import METRIC_BY_KEY, roll_up
+    from scoreboard.services.board import rows_for_period, trend
+
+    team = scope.get(Team, team_id)
+    if team is None:
+        raise HTTPException(status_code=404, detail="Team not found.")
+
+    period = Period.current_month()
+    everyone = rows_for_period(scope, period)
+    members = [r for r in everyone if (r.get("team") or UNASSIGNED) == team.name]
+    ranked = rank(members, "net_split")
+
+    totals = roll_up(members)
+    office = roll_up(everyone)
+
+    # Share of the office, so a team's number means something next to the
+    # others rather than only next to itself.
+    share = {
+        key: (totals[key] / office[key] * 100) if office.get(key) else 0.0
+        for key in ("issued_leads", "sold_leads", "gross_split", "net_split")
+    }
+
+    widgets = []
+    for spec in (
+        {"type": "big_number", "metric": "net_split", "label": "Net split"},
+        {"type": "big_number", "metric": "sold_leads", "label": "Sold leads"},
+        {"type": "bar", "metric": "net_split", "group_by": "rep", "label": "Net by rep"},
+        {"type": "bar", "metric": "close_rate", "group_by": "rep", "label": "Close rate by rep"},
+        {"type": "donut", "metric": "sold_leads", "group_by": "rep", "label": "Share of sales"},
+    ):
+        try:
+            widgets.append(chart_domain.build(spec, members))
+        except chart_domain.ChartError:
+            continue
+
+    return {
+        "team": {
+            "id": team.id, "name": team.name,
+            "lead_name": team.lead_name, "lead_role": team.lead_role,
+        },
+        "member_count": len(members),
+        "totals": totals,
+        "share_of_office": share,
+        "reps": ranked,
+        "widgets": widgets,
+        "trend": trend(scope, period, "net_split"),
+        "metric_labels": {k: v.label for k, v in METRIC_BY_KEY.items()},
+        "metric_kinds": {k: v.kind for k, v in METRIC_BY_KEY.items()},
+        "period": {"start": period.start.isoformat(), "end": period.end.isoformat()},
+    }
+
+
+@router.get("/overview")
+def overview(scope: TenantScope = Depends(user_scope)) -> dict:
+    """The whole office at a glance: totals, every team, and charts of both.
+
+    Built from the same roll-up and the same chart builder the television
+    uses. A dashboard that computed its own numbers would eventually disagree
+    with the wall, and the wall is the one people trust.
+    """
+    from scoreboard.connectors.base import Period
+    from scoreboard.domain import charts as chart_domain
+    from scoreboard.domain.leaderboard import team_totals
+    from scoreboard.domain.metrics import METRIC_BY_KEY, roll_up
+    from scoreboard.services.board import rows_for_period, trend
+    from scoreboard.services.screens import org_tokens, team_tokens
+
+    period = Period.current_month()
+    rows = rows_for_period(scope, period)
+    totals = roll_up(rows)
+
+    base = org_tokens(scope)
+    overrides = team_tokens(scope)
+    teams_by_name = {team.name: team for team in scope.all(Team)}
+
+    standings = []
+    for entry in team_totals(rows, "net_split"):
+        team = teams_by_name.get(entry["team"])
+        tokens = resolve(base, overrides.get(team.id)) if team else resolve(base)
+        standings.append({
+            "team_id": team.id if team else None,
+            "team": entry["team"],
+            "rank": entry["rank"],
+            "rep_count": entry["rep_count"],
+            "colour": tokens.get("primary"),
+            "badge_url": tokens.get("badge_url", ""),
+            "mvp": (entry.get("members") or [{}])[0].get("rep_name", ""),
+            **{key: entry.get(key, 0) for key in METRIC_BY_KEY if key in entry},
+        })
+
+    widgets = []
+    for spec in (
+        {"type": "bar", "metric": "net_split", "group_by": "team", "label": "Net split by team"},
+        {"type": "bar", "metric": "close_rate", "group_by": "team", "label": "Close rate by team"},
+        {"type": "donut", "metric": "sold_leads", "group_by": "team", "label": "Share of sales"},
+        {"type": "donut", "metric": "gross_split", "group_by": "team", "label": "Share of gross"},
+        {"type": "leaders", "metric": "net_split", "group_by": "rep", "limit": 5,
+         "label": "Top five people"},
+    ):
+        try:
+            widgets.append(chart_domain.build(spec, rows))
+        except chart_domain.ChartError:
+            continue
+
+    return {
+        "period": {"start": period.start.isoformat(), "end": period.end.isoformat()},
+        "rep_count": len(rows),
+        "totals": totals,
+        "standings": standings,
+        "widgets": widgets,
+        "trend": trend(scope, period, "net_split"),
+        "metric_labels": {k: v.label for k, v in METRIC_BY_KEY.items()},
+        "metric_kinds": {k: v.kind for k, v in METRIC_BY_KEY.items()},
     }
