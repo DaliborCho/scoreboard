@@ -59,6 +59,16 @@ def preview_live_page() -> FileResponse:
     return _page("tv.html")
 
 
+@router.get("/architecture", response_class=HTMLResponse)
+def architecture_page() -> FileResponse:
+    """The system map: how the parts fit together and why.
+
+    Served beside the thing it documents, so it is read where it is checked
+    against rather than in a folder somebody has to be told about.
+    """
+    return _page("architecture.html")
+
+
 @router.get("/admin", response_class=HTMLResponse)
 def admin_page() -> FileResponse:
     """The platform operator's panel.
@@ -77,6 +87,7 @@ def index() -> HTMLResponse:
         "<h1>Scoreboard</h1>"
         "<p><a href='/console'>Company console</a> &mdash; teams, themes, screens and displays.</p>"
         "<p><a href='/admin'>Platform admin</a> &mdash; add and manage companies.</p>"
+        "<p><a href='/architecture'>System map</a> &mdash; how it all fits together.</p>"
         "<p><a href='/docs'>API reference</a></p>"
         "<p style='color:#666'>A television opens its own link: <code>/tv/&lt;token&gt;</code></p>"
     )
