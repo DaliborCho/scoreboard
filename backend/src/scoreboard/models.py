@@ -18,6 +18,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -223,6 +224,46 @@ class RepMetrics(Base):
 
 
 # ---------------------------------------------------------------- data sources
+class MetricField(Base, TimestampMixin):
+    """One measurable value, as a row rather than a line of code.
+
+    A customer whose reporting system counts something we never guessed used to
+    need a release. Holding the catalogue here is what makes that a form.
+
+    The additive/derived split survives intact, because it is the rule the whole
+    product rests on: additive values are stored and summed, derived ones carry
+    a formula and are recomputed at whatever level is being totalled. A customer
+    can add either kind; neither can escape the arithmetic.
+    """
+
+    __tablename__ = "metric_fields"
+    __table_args__ = (
+        UniqueConstraint("org_id", "key", name="uq_metric_field_org_key"),
+        Index("ix_metric_fields_org_position", "org_id", "position"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+
+    key: Mapped[str] = mapped_column(String(80), nullable=False)
+    label: Mapped[str] = mapped_column(String(120), nullable=False)
+    short_label: Mapped[str] = mapped_column(String(16), default="", nullable=False)
+    # number | currency | percent | text | system
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)  # additive|derived|text|system
+
+    # Only for a derived field. Evaluation follows `position`, so a formula may
+    # name a field declared before it.
+    numerator: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    denominator: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    scale: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+
+    position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # Shipped with the product. A customer may relabel one but not delete it,
+    # because screens and stored figures already refer to it.
+    is_builtin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+
 class DataSource(Base, TimestampMixin):
     __tablename__ = "data_sources"
 

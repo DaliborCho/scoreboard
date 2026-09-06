@@ -8,6 +8,26 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # A database, because the pure tests once passed while a shadowed name
+    # turned the metric catalogue into a database row. Tests that never touch
+    # storage cannot see that class of defect.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: scoreboard
+          POSTGRES_PASSWORD: scoreboard
+          POSTGRES_DB: scoreboard_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+psycopg://scoreboard:scoreboard@localhost:5432/scoreboard_test
+
     steps:
       - uses: actions/checkout@v4
 
@@ -21,12 +41,16 @@ jobs:
         working-directory: backend
         run: pip install -e ".[dev]"
 
+      - name: Schema
+        working-directory: backend
+        run: alembic upgrade head
+
       - name: Tests
         working-directory: backend
-        # No database service. Every rule the suite covers — metrics,
-        # leaderboards, themes, charts, scheduling, permissions, Tableau
-        # parsing — is pure or runs against recorded fixtures, which is what
-        # keeps CI fast and keeps credentials out of it.
+        # Most of the suite is pure or runs against recorded fixtures, so no
+        # credential is ever needed. The database-backed module skips itself
+        # when DATABASE_URL is unreachable, which keeps the suite runnable
+        # anywhere while still covering the read and write path here.
         run: pytest -q
 
       - name: Lint

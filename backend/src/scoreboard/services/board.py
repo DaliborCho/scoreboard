@@ -29,8 +29,11 @@ def _latest_capture(scope: TenantScope, period: Period) -> date | None:
 
 
 def rows_for_period(
-    scope: TenantScope, period: Period, captured_on: date | None = None
+    scope: TenantScope, period: Period, captured_on: date | None = None, metrics=None
 ) -> list[dict]:
+    from scoreboard.services.catalogue import catalogue_for
+
+    metrics = metrics or catalogue_for(scope)
     captured_on = captured_on or _latest_capture(scope, period)
     if captured_on is None:
         return []
@@ -51,7 +54,10 @@ def rows_for_period(
     )
 
     rows = []
-    for rep, metrics in scope.session.execute(statement).all():
+    # `captured`, not `metrics`: the loop variable is one rep's stored figures,
+    # and `metrics` is now the organization's catalogue. Naming both the same
+    # made the catalogue silently become a database row inside this loop.
+    for rep, captured in scope.session.execute(statement).all():
         team = team_names.get(rep.team_id) or rep.source_team or UNASSIGNED
         rows.append(
             RepRow(
@@ -61,8 +67,8 @@ def rows_for_period(
                 home_branch=rep.home_branch,
                 title=rep.title,
                 hire_date=rep.hire_date,
-                components=dict(metrics.values or {}),
-            ).as_row()
+                components=dict(captured.values or {}),
+            ).as_row(metrics)
         )
     return rows
 
@@ -89,9 +95,10 @@ def trend(scope: TenantScope, period: Period, metric: str) -> list[dict]:
     for captured_on, values in scope.session.execute(statement).all():
         by_day.setdefault(captured_on, []).append(dict(values or {}))
 
-    from scoreboard.domain.metrics import roll_up
+    from scoreboard.services.catalogue import catalogue_for
 
+    metrics = catalogue_for(scope)
     return [
-        {"date": day.isoformat(), "value": roll_up(entries).get(metric, 0.0)}
+        {"date": day.isoformat(), "value": metrics.roll_up(entries).get(metric, 0.0)}
         for day, entries in sorted(by_day.items())
     ]
