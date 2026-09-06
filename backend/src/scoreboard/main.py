@@ -14,6 +14,7 @@ from scoreboard import __version__
 from scoreboard.api import (
     assets,
     console,
+    fields,
     pages,
     people,
     platform,
@@ -49,6 +50,7 @@ def create_app() -> FastAPI:
     app.include_router(people.router)
     app.include_router(assets.router)
     app.include_router(platform.router)
+    app.include_router(fields.router)
     app.include_router(pages.router)
     return app
 

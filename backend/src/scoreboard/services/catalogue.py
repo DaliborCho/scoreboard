@@ -65,6 +65,23 @@ def _to_def(row: MetricField) -> MetricDef:
     )
 
 
+def definition_from(field: FieldInput) -> MetricDef:
+    """A definition from an unsaved input, for previewing before committing."""
+    formula = (
+        Ratio(field.numerator, field.denominator, float(field.scale))
+        if field.role == DERIVED_ROLE and field.numerator and field.denominator
+        else None
+    )
+    return MetricDef(
+        key=field.key,
+        label=field.label,
+        short_label=(field.short_label or field.key[:6]).upper(),
+        kind=field.kind,
+        role=field.role,
+        formula=formula,
+    )
+
+
 def rows_for(scope: TenantScope) -> list[MetricField]:
     return sorted(scope.all(MetricField), key=lambda r: (r.position, r.id))
 

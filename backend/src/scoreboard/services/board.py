@@ -34,10 +34,6 @@ def rows_for_period(
     from scoreboard.services.catalogue import catalogue_for
 
     metrics = metrics or catalogue_for(scope)
-    captured_on = captured_on or _latest_capture(scope, period)
-    if captured_on is None:
-        return []
-
     team_names = {team.id: team.name for team in scope.all(Team)}
 
     statement = (
@@ -48,10 +44,22 @@ def rows_for_period(
             RepMetrics.org_id == scope.org_id,
             RepMetrics.period_start == period.start,
             RepMetrics.period_end == period.end,
-            RepMetrics.captured_on == captured_on,
             Rep.is_active.is_(True),
         )
     )
+
+    if captured_on is not None:
+        statement = statement.where(RepMetrics.captured_on == captured_on)
+    else:
+        # Each person's own most recent capture, not one global latest day.
+        #
+        # Reading a single day meant a partial update erased everybody who was
+        # not in it: pushing one person's figures took the other twelve off the
+        # board until the next full refresh. On a wall that reads as the system
+        # having lost the team.
+        statement = statement.distinct(RepMetrics.rep_id).order_by(
+            RepMetrics.rep_id, RepMetrics.captured_on.desc()
+        )
 
     rows = []
     # `captured`, not `metrics`: the loop variable is one rep's stored figures,
@@ -70,6 +78,9 @@ def rows_for_period(
                 components=dict(captured.values or {}),
             ).as_row(metrics)
         )
+        # How old this person's figures are, so a board can say so rather than
+        # presenting last week's number as today's.
+        rows[-1]["captured_on"] = captured.captured_on.isoformat()
     return rows
 
 

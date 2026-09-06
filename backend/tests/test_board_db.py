@@ -189,3 +189,57 @@ def test_a_refresh_never_moves_someone_between_teams(org):
     rep = org.one_by(Rep, rep_key="a")
     assert rep.team_id == bravo.id, "a refresh must never rewrite a team assignment"
     assert rep.source_team == "Alpha"
+
+
+def test_a_partial_update_does_not_empty_the_board(org):
+    """The defect a real push surfaced.
+
+    Reading one global latest capture day meant pushing figures for a single
+    person took everybody else off the board until the next full refresh. On a
+    wall that reads as the system having lost the team.
+    """
+    from datetime import timedelta
+
+    from scoreboard.connectors.base import Period
+    from scoreboard.services.board import rows_for_period
+
+    monday = date(2026, 9, 2)
+    _load(org, [
+        ("a", "Ana", "Alpha", {"issued_leads": 40, "sold_leads": 10}),
+        ("b", "Boris", "Alpha", {"issued_leads": 60, "sold_leads": 5}),
+        ("c", "Cvija", "Bravo", {"issued_leads": 20, "sold_leads": 8}),
+    ])
+    # Pretend that load happened on Monday.
+    from scoreboard.models import RepMetrics
+    for row in org.all(RepMetrics):
+        row.captured_on = monday
+    org.commit()
+
+    # Then one person's figures arrive on their own, later.
+    from scoreboard.connectors.base import SourceRecord
+    from scoreboard.services.refresh import apply_records
+    apply_records(
+        org,
+        [SourceRecord(rep_key="a", rep_name="Ana", source_team="Alpha",
+                      components={"issued_leads": 44, "sold_leads": 12})],
+        Period(start=date(2026, 9, 1), end=date(2026, 9, 30)),
+        captured_on=monday + timedelta(days=4),
+    )
+
+    rows = rows_for_period(org, Period.current_month(date(2026, 9, 15)))
+    assert len(rows) == 3, "a partial update must not take anyone off the board"
+
+    ana = next(r for r in rows if r["rep_name"] == "Ana")
+    boris = next(r for r in rows if r["rep_name"] == "Boris")
+    assert ana["issued_leads"] == 44, "the updated person shows their new figures"
+    assert boris["issued_leads"] == 60, "everyone else keeps their last known figures"
+
+
+def test_a_board_says_how_old_each_row_is(org):
+    """So a stale figure can be shown as stale rather than as today's."""
+    from scoreboard.connectors.base import Period
+    from scoreboard.services.board import rows_for_period
+
+    _load(org, [("a", "Ana", "Alpha", {"issued_leads": 10})])
+    rows = rows_for_period(org, Period.current_month(date(2026, 9, 15)))
+    assert rows[0]["captured_on"]

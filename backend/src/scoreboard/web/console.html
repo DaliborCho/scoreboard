@@ -311,6 +311,7 @@ const TABS = [
   { key: "screens",   label: "Screens",   min: "viewer" },
   { key: "displays",  label: "Displays",  min: "branch_manager" },
   { key: "access",    label: "Access",    min: "org_admin" },
+  { key: "fields",    label: "Metrics",   min: "org_admin" },
   { key: "data",      label: "Data",      min: "org_admin" },
   { key: "audit",     label: "Audit",     min: "org_admin" },
 ];
@@ -1397,6 +1398,117 @@ function guessField(target, fields) {
   }
   return "";
 }
+
+views.fields = async () => {
+  const { fields, using_defaults, kinds } = await api("/fields");
+  const stored = fields.filter(f => f.role === "additive");
+  const label = (key) => fields.find(f => f.key === key)?.label || key;
+
+  const shape = (f) => f.role === "derived"
+    ? `<span class="pill">${esc(label(f.numerator))} &divide; ${esc(label(f.denominator))}${
+        f.scale !== 1 ? ` &times; ${f.scale}` : ""}</span>`
+    : f.role === "additive"
+    ? `<span class="pill on">from the source</span>`
+    : `<span class="pill">${esc(f.role)}</span>`;
+
+  section("Metrics", "What this company measures. A stored value comes from your source and is added up; a calculated one carries its formula and is worked out fresh at every level &mdash; so a team total can never disagree with the rows above it.", `
+    ${using_defaults ? `<div class="card"><b>Using the standard set.</b>
+      <div class="hint" style="margin:.3rem 0 0">Adding or changing anything copies these in first, and they become yours.</div></div>` : ""}
+
+    <div class="card"><h3>Add a metric</h3>
+      <div class="row">
+        <div><label>Name</label><input id="f-label" placeholder="Referrals"></div>
+        <div><label>Key</label><input id="f-key" placeholder="referrals"></div>
+        <div><label>Short label</label><input id="f-short" placeholder="REF" maxlength="16"></div>
+        <div><label>Kind</label><select id="f-role">
+          <option value="additive">Stored &mdash; your source sends it</option>
+          <option value="derived">Calculated &mdash; from two others</option>
+        </select></div>
+        <div><label>Shown as</label><select id="f-kind">${kinds.filter(k => k !== "system" && k !== "text")
+          .map(k => `<option value="${k}">${k}</option>`).join("")}</select></div>
+      </div>
+      <div class="row" id="f-formula" style="margin-top:.7rem" hidden>
+        <div><label>Divide this</label><select id="f-num">${fields.filter(f => f.role !== "text" && f.role !== "system")
+          .map(f => `<option value="${esc(f.key)}">${esc(f.label)}</option>`).join("")}</select></div>
+        <div><label>By this</label><select id="f-den">${fields.filter(f => f.role !== "text" && f.role !== "system")
+          .map(f => `<option value="${esc(f.key)}">${esc(f.label)}</option>`).join("")}</select></div>
+        <div><label>Multiply by</label><input id="f-scale" type="number" step="any" value="100"></div>
+      </div>
+      <div class="row" style="margin-top:.8rem">
+        <div class="fixed"><button id="f-try">Try it on real figures</button></div>
+        <div class="fixed"><button class="primary" id="f-add">Add metric</button></div>
+      </div>
+      <div class="hint" id="f-note" style="margin:.7rem 0 0"></div>
+    </div>
+
+    <div class="card"><table>
+      <thead><tr><th class="l">Metric</th><th class="l">Key</th><th class="l">Where it comes from</th><th class="l">Shown as</th><th></th></tr></thead>
+      <tbody>${fields.map(f => `<tr>
+        <td class="l"><b>${esc(f.label)}</b> ${f.short_label ? `<span class="pill">${esc(f.short_label)}</span>` : ""}</td>
+        <td class="l"><code>${esc(f.key)}</code></td>
+        <td class="l">${shape(f)}</td>
+        <td class="l">${esc(f.kind)}</td>
+        <td>${f.id ? `<button class="sm" data-rename="${f.id}" data-label="${esc(f.label)}">Rename</button>` : ""}
+            ${f.id && !f.is_builtin ? `<button class="sm danger" data-fdel="${f.id}" data-key="${esc(f.key)}">Delete</button>` : ""}</td>
+      </tr>`).join("")}</tbody>
+    </table></div>`);
+
+  const toggle = () => { $("f-formula").hidden = $("f-role").value !== "derived"; };
+  $("f-role").onchange = toggle; toggle();
+
+  $("f-label").oninput = () => {
+    // A key is what appears in payloads and column headings, so offer one
+    // rather than making somebody invent a naming convention.
+    if (!$("f-key").dataset.touched) {
+      $("f-key").value = $("f-label").value.toLowerCase().trim()
+        .replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+    }
+  };
+  $("f-key").oninput = () => { $("f-key").dataset.touched = "1"; };
+
+  const body = () => ({
+    key: $("f-key").value.trim(),
+    label: $("f-label").value.trim(),
+    short_label: $("f-short").value.trim(),
+    kind: $("f-kind").value,
+    role: $("f-role").value,
+    numerator: $("f-role").value === "derived" ? $("f-num").value : "",
+    denominator: $("f-role").value === "derived" ? $("f-den").value : "",
+    scale: $("f-role").value === "derived" ? Number($("f-scale").value) || 1 : 1,
+  });
+
+  $("f-try").onclick = () => guard(async () => {
+    const result = await api("/fields/preview", { method: "POST", body: JSON.stringify(body()) });
+    if (!result.ok) { $("f-note").innerHTML = `<span style="color:var(--bad)">${esc(result.error)}</span>`; return; }
+    const sample = result.sample;
+    $("f-note").innerHTML = sample
+      ? `<b>${fmt(sample.office, $("f-kind").value)}</b> across the office. ${esc(result.note)}<br>` +
+        sample.people.map(p => `${esc(p.name)}: ${fmt(p.value, $("f-kind").value)}`).join(" &middot; ")
+      : esc(result.note);
+  });
+
+  $("f-add").onclick = () => guard(async () => {
+    await api("/fields", { method: "POST", body: JSON.stringify(body()) });
+    toast("Metric added", "good"); render();
+  });
+
+  onClick("[data-rename]", node => dialog("Rename metric",
+    `<div><label>Name</label><input id="rn" value="${esc(node.dataset.label)}"></div>
+     <div class="hint">The key stays the same, so screens and stored figures keep working.</div>`,
+    async (close) => {
+      const current = fields.find(f => String(f.id) === node.dataset.rename);
+      await api(`/fields/${current.id}`, { method: "PATCH", body: JSON.stringify({
+        ...current, label: $("rn").value.trim() }) });
+      close(); toast("Renamed", "good"); render();
+    }));
+
+  onClick("[data-fdel]", node => guard(async () => {
+    if (!await confirmAsync(`Delete ${node.dataset.key}?
+Stored figures for it stay in the database but stop appearing.`, "Delete")) return;
+    await api(`/fields/${node.dataset.fdel}/delete`, { method: "POST" });
+    toast("Metric deleted", "good"); render();
+  }));
+};
 
 views.data = async () => {
   const [{ sources, available }, { keys }] = await Promise.all([api("/sources"), api("/api-keys")]);

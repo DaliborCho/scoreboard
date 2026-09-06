@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 
 from scoreboard.api.deps import api_key_scope, display_scope
@@ -57,12 +57,21 @@ def connector_catalogue() -> dict:
 ingest = APIRouter(prefix="/api/v1/ingest", tags=["ingest"])
 
 
+IDENTITY = ("rep_key", "rep_name", "team", "home_branch", "title", "hire_date")
+
+
 class IngestRep(BaseModel):
     """One person's raw components for the period.
 
-    Rates and averages are not accepted. They are always derived, so a
+    Any additional key is read as a stored value, and kept only if the
+    organization's catalogue has a field by that name. That is what lets a
+    customer send a metric they invented without us shipping a schema for it.
+
+    Rates and averages are still not accepted. They are always derived, so a
     customer that sends a rounded close rate cannot skew a team total.
     """
+
+    model_config = ConfigDict(extra="allow")
 
     rep_key: str = Field(min_length=1, max_length=200)
     rep_name: str = Field(min_length=1, max_length=200)
@@ -71,12 +80,25 @@ class IngestRep(BaseModel):
     title: str = ""
     hire_date: str = ""
 
-    issued_leads: float = 0
-    pitched_leads: float = 0
-    sold_leads: float = 0
-    gross_split: float = 0
-    pending_split: float = 0
-    net_split: float = 0
+    def components(self, additive: tuple[str, ...]) -> dict[str, float]:
+        supplied = self.model_dump()
+        values = {}
+        for key in additive:
+            raw = supplied.get(key)
+            try:
+                values[key] = float(raw) if raw is not None else 0.0
+            except (TypeError, ValueError):
+                # A number that will not parse is left at zero rather than
+                # rejecting the whole payload, which would lose everybody
+                # else's figures over one bad cell.
+                values[key] = 0.0
+        return values
+
+    def unknown_keys(self, additive: tuple[str, ...]) -> list[str]:
+        return sorted(
+            key for key in (self.model_extra or {})
+            if key not in additive and key not in IDENTITY
+        )
 
 
 class IngestPayload(BaseModel):
@@ -95,6 +117,9 @@ def ingest_reps(payload: IngestPayload, scope: TenantScope = Depends(api_key_sco
     if period.start > period.end:
         raise HTTPException(status_code=422, detail="period_start is after period_end.")
 
+    from scoreboard.services.catalogue import catalogue_for
+
+    metrics = catalogue_for(scope)
     records = [
         SourceRecord(
             rep_key=entry.rep_key,
@@ -103,15 +128,23 @@ def ingest_reps(payload: IngestPayload, scope: TenantScope = Depends(api_key_sco
             home_branch=entry.home_branch,
             title=entry.title,
             hire_date=entry.hire_date,
-            components={key: getattr(entry, key) for key in ADDITIVE},
+            components=entry.components(metrics.additive),
         )
         for entry in payload.reps
     ]
 
-    result = apply_records(scope, records, period)
+    result = apply_records(scope, records, period, metrics=metrics)
+
+    # Named rather than silently dropped: a customer who sends `revenue` when
+    # their catalogue calls it `net_split` would otherwise see zeros with no
+    # explanation.
+    ignored = sorted({key for entry in payload.reps
+                      for key in entry.unknown_keys(metrics.additive)})
     return {
         "ok": True,
         "period": {"start": period.start.isoformat(), "end": period.end.isoformat()},
+        "accepted_fields": list(metrics.additive),
+        "ignored_fields": ignored,
         **result.as_dict(),
     }
 
