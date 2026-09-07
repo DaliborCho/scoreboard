@@ -249,3 +249,65 @@ def test_a_board_says_how_old_each_row_is(org):
     _load(org, [("a", "Ana", "Alpha", {"issued_leads": 10})])
     rows = rows_for_period(org, Period.current_month(date(2026, 9, 15)))
     assert rows[0]["captured_on"]
+
+
+def test_a_custom_metric_survives_into_the_total(org):
+    """The defect a live push surfaced.
+
+    Every board builder took the shipped catalogue by default, so a customer's
+    own metric appeared beside each person and then read zero in the total
+    underneath them. A board contradicting itself is worse than one missing a
+    column, because the numbers look authoritative either way.
+    """
+    from scoreboard.connectors.base import Period
+    from scoreboard.domain.leaderboard import whole_office
+    from scoreboard.services import catalogue as cat
+    from scoreboard.services.board import rows_for_period
+
+    cat.create(org, cat.FieldInput(
+        key="refunds", label="Refunds", short_label="REF", kind="number", role="additive"))
+    cat.create(org, cat.FieldInput(
+        key="net_close_rate", label="Net Close Rate", short_label="NCL", kind="percent",
+        role="derived", expression="(sold_leads - refunds) / issued_leads * 100"))
+
+    metrics = cat.catalogue_for(org)
+    _load(org, [
+        ("a", "Ana", "Alpha", {"issued_leads": 100, "sold_leads": 30, "refunds": 5}),
+        ("b", "Boris", "Alpha", {"issued_leads": 100, "sold_leads": 10, "refunds": 5}),
+    ])
+
+    rows = rows_for_period(org, Period.current_month(date(2026, 9, 15)), metrics=metrics)
+    ana = next(r for r in rows if r["rep_name"] == "Ana")
+    assert ana["net_close_rate"] == 25.0
+
+    board = whole_office(rows, "sold_leads", metrics)
+    # 30 net sales out of 200 issued, computed from the totals rather than
+    # averaged from 25% and 5%.
+    assert board["total"]["net_close_rate"] == 15.0
+
+
+def test_a_formula_with_a_threshold_is_recomputed_at_every_level(org):
+    """A tiered commission is not the sum of the tiers below it, and saying so
+    is the whole reason derived values are never stored."""
+    from scoreboard.connectors.base import Period
+    from scoreboard.domain.leaderboard import whole_office
+    from scoreboard.services import catalogue as cat
+    from scoreboard.services.board import rows_for_period
+
+    cat.create(org, cat.FieldInput(
+        key="commission", label="Commission", short_label="COMM", kind="currency",
+        role="derived", expression="net_split * (0.12 if sold_leads >= 10 else 0.08)"))
+
+    metrics = cat.catalogue_for(org)
+    _load(org, [
+        ("a", "Ana", "Alpha", {"sold_leads": 6, "net_split": 100_000}),
+        ("b", "Boris", "Alpha", {"sold_leads": 6, "net_split": 100_000}),
+    ])
+
+    rows = rows_for_period(org, Period.current_month(date(2026, 9, 15)), metrics=metrics)
+    assert all(row["commission"] == 8_000 for row in rows), "each below the threshold"
+
+    board = whole_office(rows, "net_split", metrics)
+    # Twelve sales together clears the threshold, so the office earns the higher
+    # rate on the whole amount: 24,000, not the 16,000 the rows add up to.
+    assert board["total"]["commission"] == 24_000

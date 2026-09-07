@@ -629,14 +629,20 @@ def board_preview(
         if period_start and period_end
         else Period.current_month()
     )
-    rows = rows_for_period(scope, period, group_by=group_by)
+    from scoreboard.services.catalogue import catalogue_for
+
+    # The organization's catalogue, not the shipped one. Passing the default
+    # meant a customer's own metric appeared on every row and then vanished
+    # from the total underneath them — a board contradicting itself.
+    metrics = catalogue_for(scope)
+    rows = rows_for_period(scope, period, metrics=metrics, group_by=group_by)
 
     if mode == "per_group":
-        payload = builder(rows, group, rank_by)
+        payload = builder(rows, group, rank_by, metrics)
     elif mode == "group_vs_group":
-        payload = builder(rows, groups, rank_by)
+        payload = builder(rows, groups, rank_by, metrics)
     else:
-        payload = builder(rows, rank_by)
+        payload = builder(rows, rank_by, metrics)
 
     payload["period"] = {"start": period.start.isoformat(), "end": period.end.isoformat()}
     payload["rep_count"] = len(rows)

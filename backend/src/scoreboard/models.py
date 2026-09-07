@@ -330,9 +330,15 @@ class MetricField(Base, TimestampMixin):
 
     # Only for a derived field. Evaluation follows `position`, so a formula may
     # name a field declared before it.
+    #
+    # Two ways of saying the same thing, on purpose. Most derived metrics are
+    # one division, and three labelled boxes are a better form for that than a
+    # text field. `expression` is for the rest -- a difference, a threshold, a
+    # commission that changes above a number -- and wins when it is set.
     numerator: Mapped[str] = mapped_column(String(80), default="", nullable=False)
     denominator: Mapped[str] = mapped_column(String(80), default="", nullable=False)
     scale: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+    expression: Mapped[str] = mapped_column(String(500), default="", nullable=False)
 
     position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     # Shipped with the product. A customer may relabel one but not delete it,

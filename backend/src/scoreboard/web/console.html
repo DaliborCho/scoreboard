@@ -1567,13 +1567,17 @@ function guessField(target, fields) {
 }
 
 views.fields = async () => {
-  const { fields, using_defaults, kinds } = await api("/fields");
-  const stored = fields.filter(f => f.role === "additive");
+  const { fields, using_defaults, kinds, fields_available, functions } = await api("/fields");
   const label = (key) => fields.find(f => f.key === key)?.label || key;
 
+  // A formula written as free arithmetic is shown as it was written; one
+  // written as a division is shown in words. Two ways of saying it in the
+  // form, one reading of it in the table.
   const shape = (f) => f.role === "derived"
-    ? `<span class="pill">${esc(label(f.numerator))} &divide; ${esc(label(f.denominator))}${
-        f.scale !== 1 ? ` &times; ${f.scale}` : ""}</span>`
+    ? f.expression
+      ? `<span class="pill"><code>${esc(f.expression)}</code></span>`
+      : `<span class="pill">${esc(label(f.numerator))} &divide; ${esc(label(f.denominator))}${
+          f.scale !== 1 ? ` &times; ${f.scale}` : ""}</span>`
     : f.role === "additive"
     ? `<span class="pill on">from the source</span>`
     : `<span class="pill">${esc(f.role)}</span>`;
@@ -1589,17 +1593,45 @@ views.fields = async () => {
         <div><label>Short label</label><input id="f-short" placeholder="REF" maxlength="16"></div>
         <div><label>Kind</label><select id="f-role">
           <option value="additive">Stored &mdash; your source sends it</option>
-          <option value="derived">Calculated &mdash; from two others</option>
+          <option value="derived">Calculated &mdash; worked out from the others</option>
         </select></div>
         <div><label>Shown as</label><select id="f-kind">${kinds.filter(k => k !== "system" && k !== "text")
           .map(k => `<option value="${k}">${k}</option>`).join("")}</select></div>
       </div>
-      <div class="row" id="f-formula" style="margin-top:.7rem" hidden>
-        <div><label>Divide this</label><select id="f-num">${fields.filter(f => f.role !== "text" && f.role !== "system")
-          .map(f => `<option value="${esc(f.key)}">${esc(f.label)}</option>`).join("")}</select></div>
-        <div><label>By this</label><select id="f-den">${fields.filter(f => f.role !== "text" && f.role !== "system")
-          .map(f => `<option value="${esc(f.key)}">${esc(f.label)}</option>`).join("")}</select></div>
-        <div><label>Multiply by</label><input id="f-scale" type="number" step="any" value="100"></div>
+      <div id="f-formula" style="margin-top:.7rem" hidden>
+        <div class="tvlist" style="margin-bottom:.7rem">
+          <button class="sm primary" id="f-simple">One divided by another</button>
+          <button class="sm" id="f-free">Write the arithmetic</button>
+        </div>
+
+        <div class="row" id="f-ratio">
+          <div><label>Divide this</label><select id="f-num">${fields.filter(f => f.role !== "text" && f.role !== "system")
+            .map(f => `<option value="${esc(f.key)}">${esc(f.label)}</option>`).join("")}</select></div>
+          <div><label>By this</label><select id="f-den">${fields.filter(f => f.role !== "text" && f.role !== "system")
+            .map(f => `<option value="${esc(f.key)}">${esc(f.label)}</option>`).join("")}</select></div>
+          <div><label>Multiply by</label><input id="f-scale" type="number" step="any" value="100"></div>
+        </div>
+
+        <div id="f-expr" hidden>
+          <label>Formula</label>
+          <input id="f-expression" placeholder="(sold_leads - refunds) / issued_leads * 100"
+                 spellcheck="false" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace">
+          <div class="hint" style="margin:.5rem 0 0">
+            Arithmetic over the fields below. <code>+ - * / ( )</code>, and
+            <code>${functions.map(esc).join("</code>, <code>")}</code>.
+            A threshold is written <code>a if b &gt;= 10 else c</code>.
+            Dividing by nothing gives zero, because a blank cell on a wall reads as a fault.
+          </div>
+          <div class="hint" style="margin:.4rem 0 0">
+            Available: ${fields_available.map(k =>
+              `<code class="f-ins" style="cursor:pointer" data-ins="${esc(k)}">${esc(k)}</code>`).join(" ")}
+          </div>
+          <div class="hint" style="margin:.4rem 0 0">
+            Whatever it says, it is worked out from a group&rsquo;s totals rather than
+            averaged across its rows &mdash; so a group total still cannot disagree
+            with the rows above it.
+          </div>
+        </div>
       </div>
       <div class="row" style="margin-top:.8rem">
         <div class="fixed"><button id="f-try">Try it on real figures</button></div>
@@ -1620,8 +1652,35 @@ views.fields = async () => {
       </tr>`).join("")}</tbody>
     </table></div>`);
 
-  const toggle = () => { $("f-formula").hidden = $("f-role").value !== "derived"; };
-  $("f-role").onchange = toggle; toggle();
+  let freeform = false;
+  const toggle = () => {
+    $("f-formula").hidden = $("f-role").value !== "derived";
+    $("f-ratio").hidden = freeform;
+    $("f-expr").hidden = !freeform;
+    $("f-simple").className = freeform ? "sm" : "sm primary";
+    $("f-free").className = freeform ? "sm primary" : "sm";
+  };
+  $("f-role").onchange = toggle;
+  $("f-simple").onclick = () => { freeform = false; toggle(); };
+  $("f-free").onclick = () => {
+    // Carry the three boxes over as text, so switching to arithmetic starts
+    // from what was already chosen rather than from an empty field.
+    if (!$("f-expression").value.trim()) {
+      const scale = Number($("f-scale").value) || 1;
+      const base = `${$("f-num").value} / ${$("f-den").value}`;
+      $("f-expression").value = scale === 1 ? base : `(${base}) * ${scale}`;
+    }
+    freeform = true; toggle();
+  };
+  toggle();
+
+  onClick("[data-ins]", node => {
+    const box = $("f-expression");
+    const at = box.selectionStart ?? box.value.length;
+    box.value = box.value.slice(0, at) + node.dataset.ins + box.value.slice(box.selectionEnd ?? at);
+    box.focus();
+    box.selectionStart = box.selectionEnd = at + node.dataset.ins.length;
+  });
 
   $("f-label").oninput = () => {
     // A key is what appears in payloads and column headings, so offer one
@@ -1639,9 +1698,10 @@ views.fields = async () => {
     short_label: $("f-short").value.trim(),
     kind: $("f-kind").value,
     role: $("f-role").value,
-    numerator: $("f-role").value === "derived" ? $("f-num").value : "",
-    denominator: $("f-role").value === "derived" ? $("f-den").value : "",
-    scale: $("f-role").value === "derived" ? Number($("f-scale").value) || 1 : 1,
+    numerator: $("f-role").value === "derived" && !freeform ? $("f-num").value : "",
+    denominator: $("f-role").value === "derived" && !freeform ? $("f-den").value : "",
+    scale: $("f-role").value === "derived" && !freeform ? Number($("f-scale").value) || 1 : 1,
+    expression: $("f-role").value === "derived" && freeform ? $("f-expression").value.trim() : "",
   });
 
   $("f-try").onclick = () => guard(async () => {

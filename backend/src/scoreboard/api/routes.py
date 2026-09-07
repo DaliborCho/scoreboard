@@ -16,7 +16,7 @@ from scoreboard.api.deps import api_key_scope, display_scope
 from scoreboard.connectors import catalogue
 from scoreboard.connectors.base import Period, SourceRecord
 from scoreboard.db import get_session
-from scoreboard.domain.leaderboard import MODES
+from scoreboard.domain.leaderboard import MODES, canonical_mode
 from scoreboard.domain.metrics import ADDITIVE, METRIC_DEFS
 from scoreboard.services.board import rows_for_period, trend
 from scoreboard.services.refresh import apply_records
@@ -38,7 +38,11 @@ def health(session=Depends(get_session)) -> dict:
 
 @system.get("/api/v1/metrics")
 def metric_catalogue() -> dict:
-    """What the console offers as columns, ranking options and chart series."""
+    """The shipped catalogue, for anything asking before it has signed in.
+
+    A signed-in console reads `/api/v1/fields` instead, which answers with the
+    organization's own set. This one cannot: it has no organization to ask.
+    """
     return {
         "additive": list(ADDITIVE),
         "metrics": [
@@ -163,28 +167,33 @@ def _period(period_start: date | None, period_end: date | None) -> Period:
 def board(
     mode: str = Query(default="whole_office"),
     rank_by: str = Query(default="net_split"),
-    team: str = Query(default=""),
-    teams: list[str] = Query(default=[]),
+    group: str = Query(default=""),
+    groups: list[str] = Query(default=[]),
+    group_by: str = Query(default=""),
     period_start: date | None = None,
     period_end: date | None = None,
     scoped=Depends(display_scope),
 ) -> dict:
     scope, display_token = scoped
+    mode = canonical_mode(mode)
     builder = MODES.get(mode)
     if builder is None:
         raise HTTPException(
             status_code=404, detail=f"Unknown mode '{mode}'. Known: {', '.join(MODES)}"
         )
 
-    period = _period(period_start, period_end)
-    rows = rows_for_period(scope, period)
+    from scoreboard.services.catalogue import catalogue_for
 
-    if mode == "per_team":
-        payload = builder(rows, team, rank_by)
-    elif mode == "team_vs_team":
-        payload = builder(rows, teams, rank_by)
+    period = _period(period_start, period_end)
+    metrics = catalogue_for(scope)
+    rows = rows_for_period(scope, period, metrics=metrics, group_by=group_by)
+
+    if mode == "per_group":
+        payload = builder(rows, group, rank_by, metrics)
+    elif mode == "group_vs_group":
+        payload = builder(rows, groups, rank_by, metrics)
     else:
-        payload = builder(rows, rank_by)
+        payload = builder(rows, rank_by, metrics)
 
     payload["display"] = {"name": display_token.name}
     payload["period"] = {"start": period.start.isoformat(), "end": period.end.isoformat()}

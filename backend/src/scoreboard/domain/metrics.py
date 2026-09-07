@@ -23,6 +23,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from scoreboard.domain.formula import Expression, FormulaError
+
 ADDITIVE_ROLE = "additive"
 DERIVED_ROLE = "derived"
 TEXT_ROLE = "text"
@@ -31,19 +33,19 @@ SYSTEM_ROLE = "system"
 NUMERIC_KINDS = frozenset({"number", "currency", "percent"})
 
 
-@dataclass(frozen=True)
-class Ratio:
-    """One derived value, stated rather than written in code.
+def ratio(numerator: str, denominator: str, scale: float = 1.0) -> Expression:
+    """The common case, written as the expression it is.
 
-    `close_rate` is `sold_leads / issued_leads` scaled by 100. Holding that as
-    data is what lets a customer add a metric we never thought of without a
-    release — and it keeps every such metric obeying the same summing rule,
-    because there is still only one place that evaluates them.
+    Most derived metrics really are one division: `close_rate` is
+    `sold_leads / issued_leads * 100`. The console still offers that as two
+    fields and a multiplier, because it is what most people want and a text box
+    is a worse way to say it. This is where that shorthand becomes the one
+    representation everything else evaluates.
     """
-
-    numerator: str
-    denominator: str
-    scale: float = 1.0
+    text = f"{numerator} / {denominator}"
+    if scale != 1.0:
+        text = f"({text}) * {scale:g}"
+    return Expression.parse(text, shorthand=(numerator, denominator, float(scale)))
 
 
 @dataclass(frozen=True)
@@ -53,7 +55,7 @@ class MetricDef:
     short_label: str
     kind: str  # number | currency | percent | text | system
     role: str = TEXT_ROLE
-    formula: Ratio | None = None
+    formula: Expression | None = None
 
     @property
     def is_additive(self) -> bool:
@@ -68,7 +70,7 @@ def _additive(key: str, label: str, short: str, kind: str) -> MetricDef:
     return MetricDef(key, label, short, kind, role=ADDITIVE_ROLE)
 
 
-def _derived(key: str, label: str, short: str, kind: str, formula: Ratio) -> MetricDef:
+def _derived(key: str, label: str, short: str, kind: str, formula: Expression) -> MetricDef:
     return MetricDef(key, label, short, kind, role=DERIVED_ROLE, formula=formula)
 
 
@@ -92,18 +94,6 @@ class MetricCatalogue:
         )
 
     # ------------------------------------------------------------ arithmetic
-    @staticmethod
-    def _ratio(numerator: float, denominator: float, scale: float) -> float:
-        """Division that yields 0 rather than raising on an empty denominator.
-
-        A board is read across a room with nobody beside it, so a blank cell
-        would be read as a fault in the screen. Zero is the honest reading of
-        "nothing sold out of nothing issued".
-        """
-        if not denominator:
-            return 0.0
-        return (numerator / denominator) * scale
-
     def derive(self, components: dict[str, float]) -> dict[str, float]:
         """Expand additive components into the full metric set.
 
@@ -116,12 +106,10 @@ class MetricCatalogue:
             key: float(components.get(key) or 0) for key in self.additive
         }
         for metric in self.derived:
-            formula = metric.formula
-            values[metric.key] = self._ratio(
-                values.get(formula.numerator, 0.0),
-                values.get(formula.denominator, 0.0),
-                formula.scale,
-            )
+            # Evaluated in declaration order against everything computed so
+            # far, so one derived metric may be built from another — and
+            # always from summed components, never from other people's rates.
+            values[metric.key] = metric.formula.evaluate(values)
         return values
 
     def sum_components(self, rows: list[dict]) -> dict[str, float]:
@@ -151,21 +139,21 @@ DEFAULT_DEFINITIONS: tuple[MetricDef, ...] = (
     _additive("issued_leads", "Issued Leads", "ISS", "number"),
     _additive("pitched_leads", "Pitched Leads", "PIT", "number"),
     _derived("pitched_rate", "Pitched Rate", "PIT%", "percent",
-             Ratio("pitched_leads", "issued_leads", 100.0)),
+             ratio("pitched_leads", "issued_leads", 100.0)),
     _additive("sold_leads", "Sold Leads", "SOLD", "number"),
     _derived("close_rate", "Close Rate", "CLS%", "percent",
-             Ratio("sold_leads", "issued_leads", 100.0)),
+             ratio("sold_leads", "issued_leads", 100.0)),
     _additive("gross_split", "Gross Split", "GROSS", "currency"),
     _additive("pending_split", "Pending Split", "PEND", "currency"),
     _additive("net_split", "Net Split", "NET", "currency"),
     _derived("dpl", "DPL", "DPL", "currency",
-             Ratio("net_split", "issued_leads")),
+             ratio("net_split", "issued_leads")),
     _derived("sales_retention", "Sales Retention", "RET%", "percent",
-             Ratio("net_split", "gross_split", 100.0)),
+             ratio("net_split", "gross_split", 100.0)),
     _derived("avg_gross_sale", "Avg. Gross Sale", "AGS", "currency",
-             Ratio("gross_split", "sold_leads")),
+             ratio("gross_split", "sold_leads")),
     _derived("avg_net_sale", "Avg. Net Sale", "ANS", "currency",
-             Ratio("net_split", "sold_leads")),
+             ratio("net_split", "sold_leads")),
 )
 
 DEFAULT_CATALOGUE = MetricCatalogue(DEFAULT_DEFINITIONS)
@@ -179,6 +167,28 @@ METRIC_DEFS = DEFAULT_CATALOGUE.definitions
 METRIC_BY_KEY = DEFAULT_CATALOGUE.by_key
 ADDITIVE = DEFAULT_CATALOGUE.additive
 RANKABLE = DEFAULT_CATALOGUE.rankable
+
+__all__ = [
+    "ADDITIVE",
+    "ADDITIVE_ROLE",
+    "DEFAULT_CATALOGUE",
+    "DEFAULT_DEFINITIONS",
+    "DERIVED_ROLE",
+    "METRIC_BY_KEY",
+    "METRIC_DEFS",
+    "NUMERIC_KINDS",
+    "RANKABLE",
+    "SYSTEM_ROLE",
+    "TEXT_ROLE",
+    "Expression",
+    "FormulaError",
+    "MetricCatalogue",
+    "MetricDef",
+    "derive",
+    "ratio",
+    "roll_up",
+    "sum_components",
+]
 
 derive = DEFAULT_CATALOGUE.derive
 sum_components = DEFAULT_CATALOGUE.sum_components

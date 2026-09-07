@@ -70,7 +70,8 @@ def render(
     # uses the organization's primary grouping, so an existing wall keeps
     # meaning what it meant.
     axis = str(config.get("group_by") or "") or grp.primary_key(scope)
-    rows = rows_for_period(scope, period, captured_on, group_by=axis)
+    metrics = catalogue_for(scope)
+    rows = rows_for_period(scope, period, captured_on, metrics=metrics, group_by=axis)
 
     type_keys = {kind.id: kind.key for kind in grp.types_for(scope)}
     groups_by_id = {g.id: g for g in scope.all(Group)}
@@ -86,12 +87,12 @@ def render(
             if screen and screen.group_id in groups_by_id
             else ""
         )
-        payload = builder(rows, focus, rank_by)
+        payload = builder(rows, focus, rank_by, metrics)
     elif mode == "group_vs_group":
         chosen = list(config.get("groups") or config.get("teams") or [])
-        payload = builder(rows, chosen, rank_by)
+        payload = builder(rows, chosen, rank_by, metrics)
     else:
-        payload = builder(rows, rank_by)
+        payload = builder(rows, rank_by, metrics)
 
     # ------------------------------------------------------------ theme
     base = org_tokens(scope)
@@ -142,13 +143,12 @@ def render(
     widgets, widget_errors = [], []
     for spec in widget_specs:
         try:
-            widgets.append(charts.build(spec, widget_rows, trend_points))
+            widgets.append(charts.build(spec, widget_rows, trend_points, metrics))
         except charts.ChartError as exc:
             # Surfaced rather than dropped: a silently missing chart on a wall
             # looks like the product is broken, with nothing to explain it.
             widget_errors.append({"widget": spec, "error": str(exc)})
 
-    metrics = catalogue_for(scope)
     by_key = metrics.by_key
     axis_type = grp.type_by_key(scope, axis)
     axis_label = axis_type.label if axis_type else "Group"

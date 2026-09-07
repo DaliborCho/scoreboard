@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from scoreboard.api.deps import auth_context, require_role, user_scope
+from scoreboard.domain.formula import FUNCTIONS
 from scoreboard.domain.metrics import ADDITIVE_ROLE, DERIVED_ROLE
 from scoreboard.models import MetricField, Role
 from scoreboard.services import audit
@@ -33,6 +34,7 @@ class FieldRequest(BaseModel):
     numerator: str = ""
     denominator: str = ""
     scale: float = 1.0
+    expression: str = Field(default="", max_length=500)
 
     def as_input(self) -> cat.FieldInput:
         return cat.FieldInput(**self.model_dump())
@@ -53,6 +55,7 @@ def _json(row: MetricField) -> dict:
         "numerator": row.numerator,
         "denominator": row.denominator,
         "scale": row.scale,
+        "expression": row.expression,
         "position": row.position,
         "is_builtin": row.is_builtin,
     }
@@ -78,9 +81,12 @@ def list_fields(
             {
                 "id": None, "key": m.key, "label": m.label,
                 "short_label": m.short_label, "kind": m.kind, "role": m.role,
-                "numerator": m.formula.numerator if m.formula else "",
-                "denominator": m.formula.denominator if m.formula else "",
-                "scale": m.formula.scale if m.formula else 1.0,
+                "numerator": m.formula.shorthand[0] if m.formula and m.formula.shorthand else "",
+                "denominator": (
+                    m.formula.shorthand[1] if m.formula and m.formula.shorthand else ""),
+                "scale": m.formula.shorthand[2] if m.formula and m.formula.shorthand else 1.0,
+                "expression": (
+                    "" if not m.formula or m.formula.shorthand else m.formula.text),
                 "position": index, "is_builtin": True,
             }
             for index, m in enumerate(metrics.definitions)
@@ -88,6 +94,11 @@ def list_fields(
         "roles": list(cat.ROLES),
         "kinds": list(cat.KINDS),
         "additive": list(metrics.additive),
+        # What a formula may name, and what it may call. Sent rather than
+        # hard-coded in the page, so the editor cannot drift from the evaluator.
+        "fields_available": [m.key for m in metrics.definitions
+                             if m.kind in ("number", "currency", "percent")],
+        "functions": sorted(FUNCTIONS),
     }
 
 

@@ -426,9 +426,10 @@ def group_stats(
     from scoreboard.connectors.base import Period
     from scoreboard.domain import charts as chart_domain
     from scoreboard.domain.leaderboard import UNASSIGNED, rank
-    from scoreboard.domain.metrics import METRIC_BY_KEY, roll_up
     from scoreboard.services.board import rows_for_period, trend
+    from scoreboard.services.catalogue import catalogue_for
 
+    metrics = catalogue_for(scope)
     group = scope.get(Group, group_id)
     if group is None:
         raise HTTPException(status_code=404, detail="Group not found.")
@@ -437,12 +438,12 @@ def group_stats(
         (kind.key for kind in grp.types_for(scope) if kind.id == group.type_id), ""
     )
     period = Period.current_month()
-    everyone = rows_for_period(scope, period, group_by=axis)
+    everyone = rows_for_period(scope, period, metrics=metrics, group_by=axis)
     members = [r for r in everyone if (r.get("group") or UNASSIGNED) == group.name]
-    ranked = rank(members, "net_split")
+    ranked = rank(members, "net_split", metrics)
 
-    totals = roll_up(members)
-    office = roll_up(everyone)
+    totals = metrics.roll_up(members)
+    office = metrics.roll_up(everyone)
 
     # Share of the office, so a group's number means something next to the
     # others rather than only next to itself.
@@ -460,7 +461,7 @@ def group_stats(
         {"type": "donut", "metric": "sold_leads", "group_by": "rep", "label": "Share of sales"},
     ):
         try:
-            widgets.append(chart_domain.build(spec, members))
+            widgets.append(chart_domain.build(spec, members, None, metrics))
         except chart_domain.ChartError:
             continue
 
@@ -475,8 +476,8 @@ def group_stats(
         "reps": ranked,
         "widgets": widgets,
         "trend": trend(scope, period, "net_split"),
-        "metric_labels": {k: v.label for k, v in METRIC_BY_KEY.items()},
-        "metric_kinds": {k: v.kind for k, v in METRIC_BY_KEY.items()},
+        "metric_labels": {k: v.label for k, v in metrics.by_key.items()},
+        "metric_kinds": {k: v.kind for k, v in metrics.by_key.items()},
         "period": {"start": period.start.isoformat(), "end": period.end.isoformat()},
     }
 
@@ -492,13 +493,14 @@ def overview(scope: TenantScope = Depends(user_scope)) -> dict:
     from scoreboard.connectors.base import Period
     from scoreboard.domain import charts as chart_domain
     from scoreboard.domain.leaderboard import group_totals
-    from scoreboard.domain.metrics import METRIC_BY_KEY, roll_up
     from scoreboard.services.board import rows_for_period, trend
+    from scoreboard.services.catalogue import catalogue_for
     from scoreboard.services.screens import group_tokens, org_tokens
 
     period = Period.current_month()
-    rows = rows_for_period(scope, period)
-    totals = roll_up(rows)
+    metrics = catalogue_for(scope)
+    rows = rows_for_period(scope, period, metrics=metrics)
+    totals = metrics.roll_up(rows)
 
     base = org_tokens(scope)
     overrides = group_tokens(scope)
@@ -509,7 +511,7 @@ def overview(scope: TenantScope = Depends(user_scope)) -> dict:
     }
 
     standings = []
-    for entry in group_totals(rows, "net_split"):
+    for entry in group_totals(rows, "net_split", metrics):
         group = by_name.get(entry["group"])
         tokens = resolve(base, overrides.get(group.id)) if group else resolve(base)
         standings.append({
@@ -520,7 +522,7 @@ def overview(scope: TenantScope = Depends(user_scope)) -> dict:
             "colour": tokens.get("primary"),
             "badge_url": tokens.get("badge_url", ""),
             "mvp": (entry.get("members") or [{}])[0].get("rep_name", ""),
-            **{key: entry.get(key, 0) for key in METRIC_BY_KEY if key in entry},
+            **{key: entry.get(key, 0) for key in metrics.by_key if key in entry},
         })
 
     widgets = []
@@ -537,7 +539,7 @@ def overview(scope: TenantScope = Depends(user_scope)) -> dict:
          "label": "Top five people"},
     ):
         try:
-            widgets.append(chart_domain.build(spec, rows))
+            widgets.append(chart_domain.build(spec, rows, None, metrics))
         except chart_domain.ChartError:
             continue
 
@@ -548,6 +550,6 @@ def overview(scope: TenantScope = Depends(user_scope)) -> dict:
         "standings": standings,
         "widgets": widgets,
         "trend": trend(scope, period, "net_split"),
-        "metric_labels": {k: v.label for k, v in METRIC_BY_KEY.items()},
-        "metric_kinds": {k: v.kind for k, v in METRIC_BY_KEY.items()},
+        "metric_labels": {k: v.label for k, v in metrics.by_key.items()},
+        "metric_kinds": {k: v.kind for k, v in metrics.by_key.items()},
     }

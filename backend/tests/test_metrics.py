@@ -57,7 +57,7 @@ def custom_catalogue():
     Nothing here appears anywhere in the codebase. If these tests pass, the
     metric set is genuinely data rather than a list we happened to choose.
     """
-    from scoreboard.domain.metrics import MetricCatalogue, MetricDef, Ratio
+    from scoreboard.domain.metrics import MetricCatalogue, MetricDef, ratio
 
     return MetricCatalogue([
         MetricDef("rep_name", "Technician", "TECH", "text"),
@@ -66,11 +66,11 @@ def custom_catalogue():
         MetricDef("callbacks", "Callbacks", "CB", "number", role="additive"),
         MetricDef("revenue", "Revenue", "REV", "currency", role="additive"),
         MetricDef("completion_rate", "Completion Rate", "CMP%", "percent",
-                  role="derived", formula=Ratio("jobs_done", "jobs_booked", 100.0)),
+                  role="derived", formula=ratio("jobs_done", "jobs_booked", 100.0)),
         MetricDef("callback_rate", "Callback Rate", "CB%", "percent",
-                  role="derived", formula=Ratio("callbacks", "jobs_done", 100.0)),
+                  role="derived", formula=ratio("callbacks", "jobs_done", 100.0)),
         MetricDef("revenue_per_job", "Revenue per Job", "RPJ", "currency",
-                  role="derived", formula=Ratio("revenue", "jobs_done")),
+                  role="derived", formula=ratio("revenue", "jobs_done")),
     ])
 
 
@@ -101,13 +101,13 @@ def test_the_summing_rule_holds_for_metrics_we_never_chose():
 
 def test_a_derived_metric_may_build_on_an_earlier_one():
     """Declaration order is evaluation order, so ratios can compose."""
-    from scoreboard.domain.metrics import MetricCatalogue, MetricDef, Ratio
+    from scoreboard.domain.metrics import MetricCatalogue, MetricDef, ratio
 
     catalogue = MetricCatalogue([
         MetricDef("a", "A", "A", "number", role="additive"),
         MetricDef("b", "B", "B", "number", role="additive"),
-        MetricDef("ratio", "Ratio", "R", "number", role="derived", formula=Ratio("a", "b")),
-        MetricDef("half", "Half", "H", "number", role="derived", formula=Ratio("ratio", "b")),
+        MetricDef("ratio", "Ratio", "R", "number", role="derived", formula=ratio("a", "b")),
+        MetricDef("half", "Half", "H", "number", role="derived", formula=ratio("ratio", "b")),
     ])
     values = catalogue.derive({"a": 100, "b": 4})
     assert values["ratio"] == 25.0
@@ -129,5 +129,17 @@ def test_every_derived_metric_names_operands_that_exist():
     from scoreboard.domain.metrics import DEFAULT_CATALOGUE as c
 
     for metric in c.derived:
-        assert metric.formula.numerator in c.by_key, metric.key
-        assert metric.formula.denominator in c.by_key, metric.key
+        for name in metric.formula.names:
+            assert name in c.by_key, f"{metric.key} uses {name}"
+
+
+def test_every_shipped_formula_only_uses_what_comes_before_it():
+    """Evaluation is in declaration order, so a later name would read zero."""
+    from scoreboard.domain.metrics import DEFAULT_CATALOGUE as c
+
+    seen: set[str] = set()
+    for metric in c.definitions:
+        if metric.formula:
+            for name in sorted(metric.formula.names):
+                assert name in seen, f"{metric.key} uses {name} before it exists"
+        seen.add(metric.key)

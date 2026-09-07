@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from scoreboard.domain.formula import Expression, FormulaError
 from scoreboard.domain.metrics import (
     ADDITIVE_ROLE,
     DEFAULT_CATALOGUE,
@@ -23,7 +24,7 @@ from scoreboard.domain.metrics import (
     TEXT_ROLE,
     MetricCatalogue,
     MetricDef,
-    Ratio,
+    ratio,
 )
 from scoreboard.models import MetricField
 from scoreboard.tenancy import TenantScope
@@ -46,15 +47,39 @@ class FieldInput:
     numerator: str = ""
     denominator: str = ""
     scale: float = 1.0
+    #: Free arithmetic, for the metrics a single division cannot express. Wins
+    #: over the three fields above when it is filled in.
+    expression: str = ""
 
 
 # ---------------------------------------------------------------- reading
+def _expression(role: str, numerator: str, denominator: str,
+                scale: float, expression: str) -> Expression | None:
+    """One formula out of the two ways a customer may have written it.
+
+    A stored `expression` wins; otherwise the three-box shorthand is turned
+    into the same thing. Everything downstream sees one representation, which
+    is what keeps the arithmetic in a single place.
+    """
+    if role != DERIVED_ROLE:
+        return None
+    if (expression or "").strip():
+        return Expression.parse(expression)
+    if numerator and denominator:
+        return ratio(numerator, denominator, float(scale or 1.0))
+    return None
+
+
 def _to_def(row: MetricField) -> MetricDef:
-    formula = (
-        Ratio(row.numerator, row.denominator, row.scale)
-        if row.role == DERIVED_ROLE and row.numerator and row.denominator
-        else None
-    )
+    try:
+        formula = _expression(
+            row.role, row.numerator, row.denominator, row.scale, row.expression
+        )
+    except FormulaError:
+        # A stored formula that no longer parses must not take a wall down. It
+        # is refused on save, so reaching here means the row predates a rule —
+        # the field reads zero and the console shows the problem.
+        formula = None
     return MetricDef(
         key=row.key,
         label=row.label,
@@ -67,18 +92,16 @@ def _to_def(row: MetricField) -> MetricDef:
 
 def definition_from(field: FieldInput) -> MetricDef:
     """A definition from an unsaved input, for previewing before committing."""
-    formula = (
-        Ratio(field.numerator, field.denominator, float(field.scale))
-        if field.role == DERIVED_ROLE and field.numerator and field.denominator
-        else None
-    )
     return MetricDef(
         key=field.key,
         label=field.label,
         short_label=(field.short_label or field.key[:6]).upper(),
         kind=field.kind,
         role=field.role,
-        formula=formula,
+        formula=_expression(
+            field.role, field.numerator, field.denominator,
+            float(field.scale or 1.0), field.expression,
+        ),
     )
 
 
@@ -107,6 +130,7 @@ def install_defaults(scope: TenantScope) -> int:
 
     for position, definition in enumerate(DEFAULT_CATALOGUE.definitions):
         formula = definition.formula
+        shorthand = formula.shorthand if formula else None
         scope.add(
             MetricField(
                 key=definition.key,
@@ -114,9 +138,13 @@ def install_defaults(scope: TenantScope) -> int:
                 short_label=definition.short_label,
                 kind=definition.kind,
                 role=definition.role,
-                numerator=formula.numerator if formula else "",
-                denominator=formula.denominator if formula else "",
-                scale=formula.scale if formula else 1.0,
+                numerator=shorthand[0] if shorthand else "",
+                denominator=shorthand[1] if shorthand else "",
+                scale=shorthand[2] if shorthand else 1.0,
+                # Only what could not be said in three boxes is stored as text,
+                # so the console keeps offering the simple form for the simple
+                # case.
+                expression="" if shorthand or not formula else formula.text,
                 position=position,
                 is_builtin=True,
             )
@@ -146,19 +174,37 @@ def validate(field: FieldInput, existing: list[MetricField], *, editing: str = "
 
     if field.role == DERIVED_ROLE:
         known = keys | {key}
-        for side, name in (("numerator", field.numerator), ("denominator", field.denominator)):
-            if not name:
-                raise CatalogueError(f"A calculated field needs a {side}.")
-            if name not in known:
-                raise CatalogueError(f"'{name}' is not a field in this organization.")
-        if field.numerator == field.denominator:
-            raise CatalogueError("Dividing a value by itself is always 1; that is not a metric.")
-        try:
-            scale = float(field.scale)
-        except (TypeError, ValueError):
-            raise CatalogueError("Scale must be a number.") from None
-        if scale == 0:
-            raise CatalogueError("A scale of zero would make every value zero.")
+        if (field.expression or "").strip():
+            try:
+                parsed = Expression.parse(field.expression, known)
+            except FormulaError as exc:
+                raise CatalogueError(str(exc)) from exc
+            if not parsed.names:
+                raise CatalogueError(
+                    "That formula names no fields, so it would show the same "
+                    "number for everybody. Use a stored value instead."
+                )
+            if parsed.names == {key}:
+                raise CatalogueError(
+                    f"'{key}' cannot be built out of itself."
+                )
+        else:
+            for side, name in (("numerator", field.numerator),
+                               ("denominator", field.denominator)):
+                if not name:
+                    raise CatalogueError(f"A calculated field needs a {side}.")
+                if name not in known:
+                    raise CatalogueError(f"'{name}' is not a field in this organization.")
+            if field.numerator == field.denominator:
+                raise CatalogueError(
+                    "Dividing a value by itself is always 1; that is not a metric."
+                )
+            try:
+                scale = float(field.scale)
+            except (TypeError, ValueError):
+                raise CatalogueError("Scale must be a number.") from None
+            if scale == 0:
+                raise CatalogueError("A scale of zero would make every value zero.")
         if field.kind not in NUMERIC_KINDS:
             raise CatalogueError("A calculated field has to be a number, currency or percent.")
     elif field.role == ADDITIVE_ROLE and field.kind not in NUMERIC_KINDS:
@@ -180,6 +226,7 @@ def create(scope: TenantScope, field: FieldInput) -> MetricField:
             numerator=field.numerator if field.role == DERIVED_ROLE else "",
             denominator=field.denominator if field.role == DERIVED_ROLE else "",
             scale=float(field.scale) if field.role == DERIVED_ROLE else 1.0,
+            expression=(field.expression or "").strip() if field.role == DERIVED_ROLE else "",
             position=(existing[-1].position + 1) if existing else 0,
             is_builtin=False,
         )
@@ -211,6 +258,7 @@ def update(scope: TenantScope, row: MetricField, field: FieldInput) -> MetricFie
     row.numerator = field.numerator if field.role == DERIVED_ROLE else ""
     row.denominator = field.denominator if field.role == DERIVED_ROLE else ""
     row.scale = float(field.scale) if field.role == DERIVED_ROLE else 1.0
+    row.expression = (field.expression or "").strip() if field.role == DERIVED_ROLE else ""
 
     scope.flush()
     _reject_cycles(scope)
@@ -227,7 +275,7 @@ def delete(scope: TenantScope, row: MetricField) -> None:
 
     dependents = [
         other.key for other in rows_for(scope)
-        if other.id != row.id and row.key in (other.numerator, other.denominator)
+        if other.id != row.id and row.key in _mentions(other)
     ]
     if dependents:
         raise CatalogueError(
@@ -236,6 +284,18 @@ def delete(scope: TenantScope, row: MetricField) -> None:
 
     scope.delete(row)
     scope.commit()
+
+
+def _mentions(row: MetricField) -> set[str]:
+    """Every field a formula depends on, however it was written."""
+    if row.role != DERIVED_ROLE:
+        return set()
+    if (row.expression or "").strip():
+        try:
+            return set(Expression.parse(row.expression).names)
+        except FormulaError:
+            return set()
+    return {name for name in (row.numerator, row.denominator) if name}
 
 
 def _reject_cycles(scope: TenantScope) -> None:
@@ -248,7 +308,7 @@ def _reject_cycles(scope: TenantScope) -> None:
     seen: set[str] = set()
     for row in rows_for(scope):
         if row.role == DERIVED_ROLE:
-            for name in (row.numerator, row.denominator):
+            for name in sorted(_mentions(row)):
                 if name not in seen:
                     raise CatalogueError(
                         f"'{row.label}' uses '{name}', which is not available "
