@@ -46,6 +46,14 @@ class SourceRecord:
     hire_date: str = ""
     components: dict[str, float] = field(default_factory=dict)
 
+    #: The row as it arrived, before anything was mapped or dropped. Kept so
+    #: "where did 47 come from?" has an answer that does not depend on the
+    #: source still being reachable, or on it still saying the same thing.
+    #: Never read by any arithmetic; it exists to be shown to a person.
+    source_row: dict = field(default_factory=dict)
+    #: Which source produced it, in words a customer recognises.
+    source_name: str = ""
+
 
 @dataclass
 class ConnectionResult:

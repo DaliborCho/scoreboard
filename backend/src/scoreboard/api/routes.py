@@ -133,6 +133,11 @@ def ingest_reps(payload: IngestPayload, scope: TenantScope = Depends(api_key_sco
             title=entry.title,
             hire_date=entry.hire_date,
             components=entry.components(metrics.additive),
+            # Exactly what was posted, unknown keys included. When a customer
+            # asks why a figure is what it is, this is the strongest possible
+            # answer: it is what you sent us.
+            source_row=entry.model_dump(),
+            source_name="Pushed to the API",
         )
         for entry in payload.reps
     ]

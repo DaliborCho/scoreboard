@@ -298,6 +298,13 @@ class RepMetrics(Base):
     # Raw additive components only. Rates and averages are always derived.
     values: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
+    # What the source actually said, kept so "where did 47 come from?" has an
+    # answer that does not depend on the source still being reachable or still
+    # saying the same thing. Never read by any arithmetic — it exists to be
+    # shown to a person who does not believe a number.
+    source_row: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    source_name: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+
 
 # ---------------------------------------------------------------- data sources
 class MetricField(Base, TimestampMixin):

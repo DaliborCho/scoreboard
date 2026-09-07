@@ -311,3 +311,112 @@ def test_a_formula_with_a_threshold_is_recomputed_at_every_level(org):
     # Twelve sales together clears the threshold, so the office earns the higher
     # rate on the whole amount: 24,000, not the 16,000 the rows add up to.
     assert board["total"]["commission"] == 24_000
+
+
+def test_an_explanation_agrees_with_the_number_it_explains(org):
+    """The property that makes a drill-down worth having.
+
+    An explanation that computed its own total could disagree with the figure
+    on the wall, which is worse than offering no explanation at all — one wrong
+    number becomes two, and neither is obviously the wrong one.
+    """
+    from scoreboard.connectors.base import Period
+    from scoreboard.domain.leaderboard import whole_office
+    from scoreboard.services import catalogue as cat
+    from scoreboard.services.board import rows_for_period
+    from scoreboard.services.trace import explain
+
+    _load(org, [
+        ("a", "Ana", "Alpha", {"issued_leads": 200, "sold_leads": 40}),
+        ("b", "Boris", "Alpha", {"issued_leads": 1, "sold_leads": 1}),
+        ("c", "Cvija", "Bravo", {"issued_leads": 50, "sold_leads": 9}),
+    ])
+    metrics = cat.catalogue_for(org)
+    rows = rows_for_period(org, Period.current_month(date(2026, 9, 15)), metrics=metrics)
+
+    board = whole_office(rows, "net_split", metrics)
+    trace = explain(rows, "close_rate", metrics)
+    assert trace.value == board["total"]["close_rate"]
+
+    # And it says why it is not the average of the column.
+    assert trace.inputs == {"issued_leads": 251.0, "sold_leads": 50.0}
+    assert trace.formula
+
+
+def test_an_explanation_can_be_narrowed_to_one_group(org):
+    from scoreboard.connectors.base import Period
+    from scoreboard.services import catalogue as cat
+    from scoreboard.services.board import rows_for_period
+    from scoreboard.services.trace import explain
+
+    _load(org, [
+        ("a", "Ana", "Alpha", {"net_split": 10_000}),
+        ("b", "Boris", "Alpha", {"net_split": 30_000}),
+        ("c", "Cvija", "Bravo", {"net_split": 90_000}),
+    ])
+    metrics = cat.catalogue_for(org)
+    rows = rows_for_period(org, Period.current_month(date(2026, 9, 15)), metrics=metrics)
+
+    trace = explain(rows, "net_split", metrics, group="Alpha")
+    assert trace.value == 40_000
+    assert [r["rep_name"] for r in trace.rows] == ["Boris", "Ana"], "biggest first"
+    assert trace.note == "Added up from the rows below."
+
+
+def test_the_row_the_source_sent_is_kept(org):
+    """So "where did 47 come from" survives the source no longer saying 47."""
+    from scoreboard.connectors.base import Period, SourceRecord
+    from scoreboard.services.refresh import apply_records
+    from scoreboard.services.trace import evidence
+
+    period = Period(start=date(2026, 9, 1), end=date(2026, 9, 30))
+    apply_records(org, [SourceRecord(
+        rep_key="a", rep_name="Ana", source_team="Alpha",
+        components={"sold_leads": 47},
+        source_row={"Sales Rep": "Ana", "Leads Sold": 47, "Region": "West"},
+        source_name="Their CRM",
+    )], period)
+
+    found = evidence(org, "a", period)
+    assert found["rep"]["name"] == "Ana"
+    assert found["captures"][0]["source"] == "Their CRM"
+    # Including the column nobody mapped, because mapping is guesswork until
+    # somebody can see what was actually there.
+    assert found["captures"][0]["source_row"]["Region"] == "West"
+    assert found["captures"][0]["values"]["sold_leads"] == 47
+
+
+def test_a_refresh_without_a_row_does_not_erase_the_one_before_it(org):
+    from scoreboard.connectors.base import Period, SourceRecord
+    from scoreboard.services.refresh import apply_records
+    from scoreboard.services.trace import evidence
+
+    period = Period(start=date(2026, 9, 1), end=date(2026, 9, 30))
+    apply_records(org, [SourceRecord(rep_key="a", rep_name="Ana",
+                                     components={"sold_leads": 5},
+                                     source_row={"Leads Sold": 5})], period)
+    apply_records(org, [SourceRecord(rep_key="a", rep_name="Ana",
+                                     components={"sold_leads": 9})], period)
+
+    capture = evidence(org, "a", period)["captures"][0]
+    assert capture["values"]["sold_leads"] == 9, "the figure follows the source"
+    assert capture["source_row"] == {"Leads Sold": 5}, "the evidence is not erased"
+
+
+def test_an_enormous_source_row_is_trimmed_and_says_so(org):
+    """Evidence, not a copy of the customer's database."""
+    from scoreboard.connectors.base import Period, SourceRecord
+    from scoreboard.services.refresh import MAX_SOURCE_KEYS, apply_records
+    from scoreboard.services.trace import evidence
+
+    period = Period(start=date(2026, 9, 1), end=date(2026, 9, 30))
+    apply_records(org, [SourceRecord(
+        rep_key="a", rep_name="Ana",
+        components={"sold_leads": 1},
+        source_row={f"col_{i}": "x" * 1000 for i in range(MAX_SOURCE_KEYS + 25)},
+    )], period)
+
+    stored = evidence(org, "a", period)["captures"][0]["source_row"]
+    assert len(stored) == MAX_SOURCE_KEYS + 1, "capped, plus the line saying so"
+    assert "25 more fields not stored" in stored["_dropped"]
+    assert all(len(v) <= 301 for k, v in stored.items() if k != "_dropped")

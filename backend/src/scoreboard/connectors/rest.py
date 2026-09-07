@@ -247,6 +247,11 @@ class RestConnector(Connector):
                         for metric in ADDITIVE
                         if mapping.get(metric)
                     },
+                    # The row as the API returned it, including the columns
+                    # nobody mapped. Mapping is guesswork until somebody can
+                    # see what was actually there.
+                    source_row=dict(row) if isinstance(row, dict) else {},
+                    source_name=str(self.config.get("name") or "JSON API"),
                 )
             )
         return records

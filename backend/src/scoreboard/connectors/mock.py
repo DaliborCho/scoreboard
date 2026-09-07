@@ -76,6 +76,22 @@ class MockConnector(Connector):
                         "pending_split": pending,
                         "net_split": net,
                     },
+                    # Shaped like a real export rather than like our own field
+                    # names, so the demo shows what the drill-down is for: the
+                    # source's words, not ours.
+                    source_row={
+                        "Sales Rep": name,
+                        "Team Lead": team,
+                        "USER-Home Branch": branch,
+                        "Job Title": title,
+                        "Leads Issued": issued,
+                        "Leads Pitched": pitched,
+                        "Leads Sold": sold,
+                        "Gross Split $": gross,
+                        "Pending Split $": pending,
+                        "Net Split $": net,
+                    },
+                    source_name="Demo generator",
                 )
             )
         return records

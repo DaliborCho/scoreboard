@@ -649,6 +649,68 @@ def board_preview(
     return payload
 
 
+# ---------------------------------------------------------------- where a number came from
+@router.get("/trace")
+def trace_number(
+    metric: str = Query(...),
+    group: str = Query(default=""),
+    group_by: str = Query(default=""),
+    period_start: date | None = None,
+    period_end: date | None = None,
+    scope: TenantScope = Depends(user_scope),
+) -> dict:
+    """Take one figure apart into the rows that made it.
+
+    Reruns the board's own roll-up rather than computing a second total, so an
+    explanation cannot disagree with the number it claims to explain.
+    """
+    from scoreboard.services.catalogue import catalogue_for
+    from scoreboard.services.trace import explain
+
+    period = (
+        Period(start=period_start, end=period_end)
+        if period_start and period_end
+        else Period.current_month()
+    )
+    metrics = catalogue_for(scope)
+    axis = group_by or grp.primary_key(scope)
+    rows = rows_for_period(scope, period, metrics=metrics, group_by=axis)
+
+    try:
+        trace = explain(rows, metric, metrics, group=group, axis=group_by)
+    except KeyError:
+        raise HTTPException(
+            status_code=404, detail=f"'{metric}' is not a metric in this organization."
+        ) from None
+
+    return {
+        **trace.as_dict(),
+        "period": {"start": period.start.isoformat(), "end": period.end.isoformat()},
+        "group_by": axis,
+    }
+
+
+@router.get("/reps/{rep_key}/evidence")
+def rep_evidence(
+    rep_key: str,
+    period_start: date | None = None,
+    period_end: date | None = None,
+    scope: TenantScope = Depends(user_scope),
+) -> dict:
+    """What the source actually sent for one person, capture by capture."""
+    from scoreboard.services.trace import evidence
+
+    period = (
+        Period(start=period_start, end=period_end)
+        if period_start and period_end
+        else Period.current_month()
+    )
+    found = evidence(scope, rep_key, period)
+    if not found:
+        raise HTTPException(status_code=404, detail="Nobody here by that key.")
+    return found
+
+
 @router.get("/board/trend")
 def board_trend(
     metric: str = Query(default="net_split"),

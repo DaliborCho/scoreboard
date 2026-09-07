@@ -167,10 +167,16 @@ h2 { font-size: 26px; font-weight: 600; letter-spacing: -.02em; margin-bottom: .
   display: flex; align-items: center; justify-content: center; padding: 1.5rem; z-index: 60;
   animation: fade .16s ease;
 }
-#modal .card {
+/* The direct child only. Matching every descendant capped the cards *inside*
+   a dialog at the dialog's own width, which is what gave the drill-down its
+   second scrollbar and cut its last two columns off. */
+#modal > .card {
   max-width: 34rem; width: 100%; max-height: 82vh; overflow: auto; margin: 0;
   box-shadow: 0 20px 60px rgba(0,0,0,.28); animation: pop .18s ease;
 }
+/* A read-only panel is mostly a table, and a table wants the room. */
+#modal > .card.wide { max-width: min(60rem, 94vw); }
+#modal .card table { width: 100%; }
 @keyframes fade { from { opacity: 0; } }
 @keyframes pop { from { opacity: 0; transform: scale(.97) translateY(6px); } }
 
@@ -461,6 +467,94 @@ function dialog(title, bodyHtml, onConfirm, confirmLabel = "Save") {
   if (first) first.focus();
 }
 
+function panel(title, bodyHtml) {
+  const host = $("modal");
+  host.innerHTML = `<div class="card wide">
+      <h3>${esc(title)}</h3>
+      <div id="dlg-body" class="stack">${bodyHtml}</div>
+      <div class="row" style="margin-top:1rem;justify-content:flex-end">
+        <div class="fixed"><button class="primary" id="dlg-close">Close</button></div>
+      </div>
+    </div>`;
+  host.hidden = false;
+  const close = () => { host.hidden = true; host.innerHTML = ""; document.removeEventListener("keydown", onKey); };
+  const onKey = (e) => { if (e.key === "Escape") close(); };
+  document.addEventListener("keydown", onKey);
+  $("dlg-close").onclick = close;
+  host.onclick = (e) => { if (e.target === host) close(); };
+  return close;
+}
+
+
+// A board is arithmetic done on somebody else's data and shown to a room. The
+// first thing said about a disliked figure is that it must be wrong, so every
+// number on it is a link to the rows it was made from.
+async function explainNumber(metric, group = "", groupBy = "") {
+  const query = new URLSearchParams({ metric });
+  if (group) query.set("group", group);
+  if (groupBy) query.set("group_by", groupBy);
+
+  let data;
+  try {
+    data = await api("/trace?" + query.toString());
+  } catch (error) { toast(error.message, "bad"); return; }
+
+  const inputs = Object.entries(data.inputs || {});
+  // The customer's word for each field, not our column name.
+  const named = (key) => (data.input_labels || {})[key] || key;
+  const head = `
+    <div class="hero-card" style="align-items:flex-start">
+      <div>
+        <div class="hint" style="margin:0">${esc(data.label)} &middot; ${esc(data.scope)}</div>
+        <div class="big" style="font-size:30px">${fmt(data.value, data.kind)}</div>
+        ${data.formula ? `<div class="hint" style="margin:.35rem 0 0">
+          <code>${esc(data.formula)}</code></div>` : ""}
+        ${inputs.length ? `<div class="hint" style="margin:.35rem 0 0">${
+          inputs.map(([k, v]) => `${esc(named(k))} = <b>${fmt(v, "number")}</b>`).join(" &middot; ")
+        }</div>` : ""}
+        <div class="hint" style="margin:.45rem 0 0">${esc(data.note)}</div>
+      </div>
+    </div>`;
+
+  const extra = inputs.map(([k]) => k).filter(k => k !== metric);
+  const table = `<div class="card"><table>
+      <thead><tr><th class="l">Rep</th><th class="l">Group</th>
+        ${extra.map(k => `<th>${esc(named(k))}</th>`).join("")}
+        <th>${esc(data.label)}</th><th class="l">As of</th><th></th></tr></thead>
+      <tbody>${data.rows.map(r => `<tr>
+        <td class="l"><b>${esc(r.rep_name)}</b></td>
+        <td class="l">${esc(r.group || "")}</td>
+        ${extra.map(k => `<td>${fmt(r.inputs[k], "number")}</td>`).join("")}
+        <td>${fmt(r.value, data.kind)}</td>
+        <td class="l">${esc(r.captured_on || "")}</td>
+        <td><button class="sm" data-evidence="${esc(r.rep_key)}">Source</button></td>
+      </tr>`).join("") || `<tr><td class="l" colspan="9">No rows in this period.</td></tr>`}</tbody>
+    </table></div>`;
+
+  panel(`Where ${data.label} comes from`, head + table);
+
+  $("modal").querySelectorAll("[data-evidence]").forEach(button => {
+    button.onclick = () => guard(async () => {
+      const found = await api(`/reps/${encodeURIComponent(button.dataset.evidence)}/evidence`);
+      panel(`What the source sent for ${found.rep.name}`,
+        `<div class="hint">${esc(found.note)}</div>` +
+        found.captures.map(c => `<div class="card">
+           <h3>${esc(c.captured_on)} ${c.source ? `<span class="pill">${esc(c.source)}</span>` : ""}</h3>
+           <div class="hint" style="margin:0 0 .5rem">Read as:
+             ${Object.entries(c.values).map(([k, v]) =>
+               `${esc(k)} = <b>${fmt(v, "number")}</b>`).join(" &middot; ")}</div>
+           ${Object.keys(c.source_row).length
+             ? `<table><tbody>${Object.entries(c.source_row).map(([k, v]) =>
+                 `<tr><td class="l"><code>${esc(k)}</code></td><td class="l">${esc(v)}</td></tr>`
+               ).join("")}</tbody></table>`
+             : `<div class="hint" style="margin:0">This capture predates keeping the
+                  source row. Later ones will have it.</div>`}
+         </div>`).join(""));
+    });
+  });
+}
+
+
 function confirmAsync(message, confirmLabel = "Yes, do it") {
   return new Promise(resolve => {
     let answered = false;
@@ -740,14 +834,35 @@ views.board = async () => {
   const cell = (rep, col) => col === "rank" ? rep.rank
     : (col === "rep_name" || col === "group") ? esc(rep[col]) : fmt(rep[col], kinds[col] || "number");
 
-  section("Live board", `${data.rep_count} reps &middot; ${data.period.start} to ${data.period.end}`, `
-    <div class="card"><table>
+  section("Live board",
+    `${data.rep_count} reps &middot; ${data.period.start} to ${data.period.end} &middot; every total opens the rows behind it`,
+    `<div class="card"><table>
       <thead><tr>${columns.map(c => `<th class="${c === "rep_name" || c === "group" ? "l" : ""}">${labels[c]}</th>`).join("")}</tr></thead>
       <tbody>${data.reps.map(r => `<tr>${columns.map(c =>
-        `<td class="${c === "rep_name" || c === "group" ? "l" : ""}">${cell(r, c)}</td>`).join("")}</tr>`).join("")}</tbody>
+        `<td class="${c === "rep_name" || c === "group" ? "l" : ""}">${
+          c === "rep_name"
+            ? `<button class="ghost" data-person="${esc(r.rep_key)}" style="padding:.15rem .25rem"><b>${esc(r.rep_name)}</b></button>`
+            : cell(r, c)}</td>`).join("")}</tr>`).join("")}</tbody>
       <tfoot><tr><td></td><td class="l"><b>TOTAL</b></td><td></td>${columns.slice(3).map(c =>
-        `<td><b>${fmt(data.total[c], kinds[c] || "number")}</b></td>`).join("")}</tr></tfoot>
+        `<td><button class="ghost" data-trace="${esc(c)}" style="padding:.15rem .3rem"><b>${
+          fmt(data.total[c], kinds[c] || "number")}</b></button></td>`).join("")}</tr></tfoot>
     </table></div>`);
+
+  onClick("[data-trace]", node => explainNumber(node.dataset.trace));
+  onClick("[data-person]", node => guard(async () => {
+    const found = await api(`/reps/${encodeURIComponent(node.dataset.person)}/evidence`);
+    panel(`What the source sent for ${found.rep.name}`,
+      `<div class="hint">${esc(found.note)}</div>` +
+      found.captures.map(c => `<div class="card">
+         <h3>${esc(c.captured_on)} ${c.source ? `<span class="pill">${esc(c.source)}</span>` : ""}</h3>
+         ${Object.keys(c.source_row).length
+           ? `<table><tbody>${Object.entries(c.source_row).map(([k, v]) =>
+               `<tr><td class="l"><code>${esc(k)}</code></td><td class="l">${esc(v)}</td></tr>`
+             ).join("")}</tbody></table>`
+           : `<div class="hint" style="margin:0">This capture predates keeping the
+                source row. Later ones will have it.</div>`}
+       </div>`).join(""));
+  }));
 };
 
 views.groups = async () => {

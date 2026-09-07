@@ -171,6 +171,9 @@ def parse_csv(csv_text: str, mapping: dict | None = None) -> list[SourceRecord]:
 
     totals: dict[str, dict] = {}
     meta: dict[str, dict] = {}
+    # How many export lines fed each person, so a stored record can say it was
+    # assembled rather than pretending to be a row that existed.
+    line_counts: dict[str, int] = {}
     order: list[str] = []
 
     for row in reader:
@@ -180,7 +183,9 @@ def parse_csv(csv_text: str, mapping: dict | None = None) -> list[SourceRecord]:
         if name not in totals:
             totals[name] = {}
             meta[name] = {}
+            line_counts[name] = 0
             order.append(name)
+        line_counts[name] += 1
 
         lead_id = (row.get(lead_col) or "").strip() if lead_col else ""
         # Tableau emits per-rep "All" roll-up rows; counting them double-counts.
@@ -220,6 +225,15 @@ def parse_csv(csv_text: str, mapping: dict | None = None) -> list[SourceRecord]:
                 rep_key=rep_key_for(name),
                 rep_name=name,
                 components=components,
+                # One person's figures come from several export lines, so the
+                # honest record is what was read for them rather than a row
+                # that never existed. `_lines` says how many fed it.
+                source_row={
+                    **components,
+                    **{k: v for k, v in meta[name].items() if v},
+                    "_lines": line_counts.get(name, 0),
+                },
+                source_name="Tableau export",
                 **{k: meta[name].get(k, "") for k in
                    ("source_team", "home_branch", "title", "hire_date")},
             )

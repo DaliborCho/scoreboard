@@ -293,12 +293,12 @@ footer {
   </p>
 
   <dl class="facts">
-    <div><dt>API routes</dt><dd>76</dd></div>
+    <div><dt>API routes</dt><dd>78</dd></div>
     <div><dt>Tables</dt><dd>17</dd></div>
     <div><dt>Connectors</dt><dd>4</dd></div>
     <div><dt>Board modes</dt><dd>4</dd></div>
     <div><dt>Chart types</dt><dd>6</dd></div>
-    <div><dt>Tests</dt><dd>157</dd></div>
+    <div><dt>Tests</dt><dd>197</dd></div>
   </dl>
 </header>
 
@@ -921,6 +921,34 @@ footer {
       components are accepted from a source, so the mistake has nowhere to enter.
     </figcaption>
   </figure>
+
+  <h2>Every number opens the rows behind it</h2>
+  <p>
+    A board is arithmetic performed on somebody else&rsquo;s data and shown to a
+    room. The first thing anybody says about a figure they dislike is that it
+    must be wrong, and until there is an answer to <em>where did that come
+    from</em>, the whole board is only as trusted as the person who installed
+    it. So a total is a link, and there are two layers underneath it.
+  </p>
+  <p>
+    <b>The rows.</b> Clicking 16.2% shows the formula, the totals it was
+    evaluated against &mdash; 82 sales out of 506 leads &mdash; and every person
+    who contributed, with the components they contributed. Nothing is stored to
+    make this possible; it is the same roll-up the board ran, shown rather than
+    hidden. Deliberately the same one, because an explanation that computed its
+    own total could disagree with the figure it claims to explain, and then
+    there are two wrong numbers instead of one.
+  </p>
+  <p>
+    <b>The row behind the row.</b> Each capture keeps the payload or export
+    line it came from, trimmed but never silently: what is dropped is counted
+    in its place. So the trail ends at what the source actually said, months
+    later, whether or not it still says it &mdash; including the columns nobody
+    mapped, because mapping is guesswork until somebody can see what was really
+    there. And every capture is kept, not only the newest, so
+    &ldquo;it was different yesterday&rdquo; is a claim the product can settle
+    rather than deny.
+  </p>
 </section>
 
 <!-- ============================================================ board -->
@@ -1363,6 +1391,17 @@ footer {
               &middot; encrypted credentials, never returned</td>
         </tr>
         <tr>
+          <td>Metrics</td>
+          <td>The catalogue is rows a customer owns &middot; add a stored value
+              or a calculated one &middot; a calculated one is either a division
+              in three boxes or free arithmetic, with thresholds and
+              <code>min</code> / <code>max</code> / <code>abs</code> /
+              <code>round</code> &middot; parsed, never executed &middot;
+              previewed against real figures before saving &middot; a stored
+              value the source sends but nobody defined is named back rather
+              than dropped</td>
+        </tr>
+        <tr>
           <td>Boards</td>
           <td>Four modes, each along whichever axis the screen names &middot;
               six chart types, groupable by a different axis than the board
@@ -1381,8 +1420,9 @@ footer {
           <td>Console</td>
           <td>Home dashboard with office totals and group comparison charts
               &middot; a page per group with its own statistics &middot; live
-              board &middot; people &middot; screens and widget builder &middot;
-              displays and rotation</td>
+              board where every total opens the rows behind it, down to the
+              payload the source sent &middot; people &middot; screens and
+              widget builder &middot; displays and rotation</td>
         </tr>
       </tbody>
     </table>

@@ -36,6 +36,34 @@ class RefreshResult:
         }
 
 
+#: A stored payload is evidence, not a copy of the customer's database. These
+#: caps keep one enormous row from bloating every capture; what is dropped is
+#: named in its place, so the record never quietly pretends to be complete.
+MAX_SOURCE_KEYS = 60
+MAX_SOURCE_VALUE = 300
+
+
+def _keepable(row: dict | None) -> dict:
+    """The source row, trimmed to something worth storing on every capture."""
+    if not isinstance(row, dict) or not row:
+        return {}
+
+    kept: dict = {}
+    for key in list(row)[:MAX_SOURCE_KEYS]:
+        value = row[key]
+        if isinstance(value, (int, float, bool)) or value is None:
+            kept[str(key)[:80]] = value
+        else:
+            text = str(value)
+            kept[str(key)[:80]] = (
+                text[:MAX_SOURCE_VALUE] + "…" if len(text) > MAX_SOURCE_VALUE else text
+            )
+    dropped = len(row) - len(kept)
+    if dropped > 0:
+        kept["_dropped"] = f"{dropped} more fields not stored"
+    return kept
+
+
 def _components(record: SourceRecord, metrics: MetricCatalogue) -> dict[str, float]:
     """Keep only additive values; a source cannot supply a rate or an average.
 
@@ -105,6 +133,7 @@ def apply_records(
         ).first()
 
         values = _components(record, metrics)
+        evidence = _keepable(record.source_row)
         if stored is None:
             scope.add(
                 RepMetrics(
@@ -113,10 +142,18 @@ def apply_records(
                     period_end=period.end,
                     captured_on=captured_on,
                     values=values,
+                    source_row=evidence,
+                    source_name=record.source_name[:200],
                 )
             )
         else:
             stored.values = values
+            # Only replaced when this refresh actually carried a row. A source
+            # that supplies none must not erase evidence an earlier one left.
+            if evidence:
+                stored.source_row = evidence
+            if record.source_name:
+                stored.source_name = record.source_name[:200]
             stored.captured_at = datetime.now(UTC)
         result.metrics_written += 1
 
