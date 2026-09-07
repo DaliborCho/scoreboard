@@ -6,8 +6,9 @@ JWT cannot be withdrawn before it expires.
 
 Permissions are a rank plus two scope checks. The rank answers "how senior",
 the scope answers "over which part of the company" — a team lead outranks
-nobody outside their own team, which is exactly the shape the product needs
-once a customer has more than one office.
+nobody outside their own group, which is exactly the shape the product needs
+once a customer has more than one office. Scope is one group id, and
+authority reaches everything beneath it.
 """
 from __future__ import annotations
 
@@ -17,7 +18,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from scoreboard.models import Membership, Organization, Role, Team, User, UserSession
+from scoreboard.models import Group, Membership, Organization, Role, User, UserSession
 from scoreboard.security import (
     TOKEN_PREFIX_LENGTH,
     generate_token,
@@ -228,41 +229,70 @@ def has_role(context: AuthContext, minimum: Role) -> bool:
     return ROLE_RANK[context.role] >= ROLE_RANK[minimum]
 
 
-def can_edit_team(session: Session, context: AuthContext, team: Team) -> bool:
-    """Scope check for team-level editing, on top of the rank check.
+def subtree(groups: list[Group], root_id: int) -> set[int]:
+    """A group and everything beneath it.
+
+    Authority follows the structure rather than a second copy of it: a branch
+    manager holds a branch, teams sit inside branches, so the teams they may
+    edit are simply the ones underneath. Adding a third level later widens
+    their reach automatically instead of needing another column here.
+
+    Pure, and separate from the query, so the rule can be tested without a
+    database standing in for it.
+    """
+    children: dict[int, list[int]] = {}
+    for group in groups:
+        if group.parent_id:
+            children.setdefault(group.parent_id, []).append(group.id)
+
+    found: set[int] = set()
+    queue = [root_id]
+    while queue:
+        current = queue.pop()
+        if current in found:
+            continue
+        found.add(current)
+        queue.extend(children.get(current, []))
+    return found
+
+
+def _subtree(session: Session, org_id: int, root_id: int) -> set[int]:
+    return subtree(
+        list(session.scalars(select(Group).where(Group.org_id == org_id)).all()), root_id
+    )
+
+
+def can_edit_group(session: Session, context: AuthContext, group: Group) -> bool:
+    """Scope check for group-level editing, on top of the rank check.
 
     This is what lets a customer hand a team lead their own logo and colours
     without handing them everyone else's.
     """
-    if context.membership is None or team.org_id != context.org_id:
+    if context.membership is None or group.org_id != context.org_id:
         return False
     if has_role(context, Role.org_admin):
         return True
-    if context.role == Role.branch_manager:
-        return context.membership.branch_id is not None and (
-            team.branch_id == context.membership.branch_id
-        )
+    held = context.membership.group_id
+    if held is None:
+        return False
     if context.role == Role.team_lead:
-        return context.membership.team_id == team.id
+        # A team lead holds exactly one group and does not reach below it;
+        # nothing is meant to sit under a team, and if a customer builds
+        # something that does, it is not theirs by default.
+        return held == group.id
+    if context.role == Role.branch_manager:
+        return group.id in _subtree(session, context.org_id, held)
     return False
 
 
-def editable_team_ids(session: Session, context: AuthContext) -> list[int] | None:
-    """Team ids this person may edit, or None meaning "all of them"."""
+def editable_group_ids(session: Session, context: AuthContext) -> list[int] | None:
+    """Group ids this person may edit, or None meaning "all of them"."""
     if has_role(context, Role.org_admin):
         return None
-    if context.membership is None:
+    if context.membership is None or context.membership.group_id is None:
         return []
-    if context.role == Role.branch_manager and context.membership.branch_id:
-        return [
-            team.id
-            for team in session.scalars(
-                select(Team).where(
-                    Team.org_id == context.org_id,
-                    Team.branch_id == context.membership.branch_id,
-                )
-            ).all()
-        ]
-    if context.role == Role.team_lead and context.membership.team_id:
-        return [context.membership.team_id]
+    if context.role == Role.branch_manager:
+        return sorted(_subtree(session, context.org_id, context.membership.group_id))
+    if context.role == Role.team_lead:
+        return [context.membership.group_id]
     return []

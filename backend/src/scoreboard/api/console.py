@@ -2,7 +2,7 @@
 
 Grouped by resource, but every mutating endpoint answers the same two
 questions before acting — is this person senior enough (rank), and does their
-authority cover this particular team (scope). Rank alone would let a team lead
+authority cover this particular group (scope). Rank alone would let a team lead
 edit a neighbouring team.
 """
 from __future__ import annotations
@@ -18,25 +18,27 @@ from scoreboard.api.deps import auth_context, require_role, user_scope
 from scoreboard.connectors import build, catalogue
 from scoreboard.connectors.base import Period, SourceError
 from scoreboard.db import get_session
-from scoreboard.domain.leaderboard import MODES
+from scoreboard.domain.leaderboard import MODES, canonical_mode
 from scoreboard.models import (
     ApiKey,
     AuditLog,
-    Branch,
     DataSource,
     DisplayToken,
+    Group,
+    GroupMembership,
+    GroupType,
     Organization,
     Rep,
     Role,
-    Team,
 )
 from scoreboard.security import encrypt_secret, generate_token
 from scoreboard.services import audit, ratelimit
+from scoreboard.services import groups as grp
 from scoreboard.services.auth import (
     AuthContext,
     authenticate,
-    can_edit_team,
-    editable_team_ids,
+    can_edit_group,
+    editable_group_ids,
     memberships_for,
     revoke_session,
     start_session,
@@ -176,11 +178,8 @@ def me(
         "is_operator": context.user.is_superadmin,
         "organization": {"id": org.id, "name": org.name, "slug": org.slug} if org else None,
         "role": context.role.value if context.role else None,
-        "scope": {
-            "branch_id": context.membership.branch_id if context.membership else None,
-            "team_id": context.membership.team_id if context.membership else None,
-        },
-        "editable_team_ids": editable_team_ids(session, context),
+        "scope": {"group_id": context.membership.group_id if context.membership else None},
+        "editable_group_ids": editable_group_ids(session, context),
     }
 
 
@@ -203,142 +202,294 @@ def switch_org(
     return {"ok": True, "active_org_id": switched.org_id, "role": switched.role.value}
 
 
-# ---------------------------------------------------------------- teams
-class TeamRequest(BaseModel):
+# ---------------------------------------------------------------- groupings
+class GroupTypeRequest(BaseModel):
+    key: str = Field(default="", max_length=40)
+    label: str = Field(min_length=1, max_length=80)
+    plural_label: str = Field(default="", max_length=80)
+
+
+class GroupRequest(BaseModel):
+    type_id: int | None = None
     name: str = Field(min_length=1, max_length=200)
-    branch_id: int | None = None
+    parent_id: int | None = None
     lead_name: str = ""
     lead_role: str = "Sales Manager"
 
 
-def _team_json(team: Team) -> dict:
+def _refuse_group(error: grp.GroupError) -> HTTPException:
+    return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error))
+
+
+def _type_json(kind: GroupType) -> dict:
     return {
-        "id": team.id,
-        "name": team.name,
-        "branch_id": team.branch_id,
-        "lead_name": team.lead_name,
-        "lead_role": team.lead_role,
-        "is_active": team.is_active,
+        "id": kind.id,
+        "key": kind.key,
+        "label": kind.label,
+        "plural_label": kind.plural_label,
+        "position": kind.position,
+        "is_primary": kind.is_primary,
+        "is_builtin": kind.is_builtin,
     }
 
 
-@router.get("/teams")
-def list_teams(scope: TenantScope = Depends(user_scope)) -> dict:
-    return {"teams": [_team_json(t) for t in scope.all(Team)]}
+def _group_json(group: Group, counts: dict[int, int] | None = None) -> dict:
+    return {
+        "id": group.id,
+        "type_id": group.type_id,
+        "name": group.name,
+        "parent_id": group.parent_id,
+        "lead_name": group.lead_name,
+        "lead_role": group.lead_role,
+        "is_active": group.is_active,
+        "member_count": (counts or {}).get(group.id, 0),
+    }
 
 
-@router.post("/teams", status_code=status.HTTP_201_CREATED)
-def create_team(
-    payload: TeamRequest,
+@router.get("/group-types")
+def list_group_types(scope: TenantScope = Depends(user_scope)) -> dict:
+    return {"group_types": [_type_json(t) for t in grp.types_for(scope)]}
+
+
+@router.post("/group-types", status_code=status.HTTP_201_CREATED)
+def create_group_type(
+    payload: GroupTypeRequest,
+    context: AuthContext = Depends(require_role(Role.org_admin)),
+    scope: TenantScope = Depends(user_scope),
+) -> dict:
+    """Add an axis: regions, product lines, hiring cohorts.
+
+    This is the change that used to need a release. Everything downstream —
+    boards, charts, themes, permissions — reads group types rather than a
+    hard-coded pair, so a new one works everywhere the moment it exists.
+    """
+    key = payload.key or payload.label.strip().lower().replace(" ", "_")
+    try:
+        kind = grp.create_type(scope, key, payload.label, payload.plural_label)
+    except grp.GroupError as exc:
+        raise _refuse_group(exc) from exc
+
+    audit.record(
+        scope, "group_type.create", actor_user_id=context.user.id,
+        actor_label=context.user.email, target=kind.key,
+    )
+    scope.commit()
+    return _type_json(kind)
+
+
+@router.patch("/group-types/{type_id}")
+def rename_group_type(
+    type_id: int,
+    payload: GroupTypeRequest,
+    context: AuthContext = Depends(require_role(Role.org_admin)),
+    scope: TenantScope = Depends(user_scope),
+) -> dict:
+    kind = scope.get(GroupType, type_id)
+    if kind is None:
+        raise HTTPException(status_code=404, detail="Grouping not found.")
+    try:
+        grp.rename_type(scope, kind, payload.label, payload.plural_label)
+    except grp.GroupError as exc:
+        raise _refuse_group(exc) from exc
+
+    audit.record(
+        scope, "group_type.rename", actor_user_id=context.user.id,
+        actor_label=context.user.email, target=kind.key,
+    )
+    scope.commit()
+    return _type_json(kind)
+
+
+@router.post("/group-types/{type_id}/primary")
+def set_primary_group_type(
+    type_id: int,
+    context: AuthContext = Depends(require_role(Role.org_admin)),
+    scope: TenantScope = Depends(user_scope),
+) -> dict:
+    """Choose what a board groups by when a screen does not say."""
+    kind = scope.get(GroupType, type_id)
+    if kind is None:
+        raise HTTPException(status_code=404, detail="Grouping not found.")
+    grp.make_primary(scope, kind)
+    audit.record(
+        scope, "group_type.primary", actor_user_id=context.user.id,
+        actor_label=context.user.email, target=kind.key,
+    )
+    scope.commit()
+    return {"ok": True, "group_types": [_type_json(t) for t in grp.types_for(scope)]}
+
+
+@router.post("/group-types/{type_id}/delete")
+def delete_group_type(
+    type_id: int,
+    context: AuthContext = Depends(require_role(Role.org_admin)),
+    scope: TenantScope = Depends(user_scope),
+) -> dict:
+    kind = scope.get(GroupType, type_id)
+    if kind is None:
+        raise HTTPException(status_code=404, detail="Grouping not found.")
+    key = kind.key
+    try:
+        grp.delete_type(scope, kind)
+    except grp.GroupError as exc:
+        raise _refuse_group(exc) from exc
+
+    audit.record(
+        scope, "group_type.delete", actor_user_id=context.user.id,
+        actor_label=context.user.email, target=key,
+    )
+    scope.commit()
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------- groups
+@router.get("/groups")
+def list_groups(
+    type_key: str = Query(default="", alias="type"),
+    scope: TenantScope = Depends(user_scope),
+) -> dict:
+    types = grp.types_for(scope)
+    wanted = next((t for t in types if t.key == type_key), None) if type_key else None
+    counts = grp.member_counts(scope)
+    rows = grp.groups_for(scope, wanted.id if wanted else None)
+    return {
+        "groups": [_group_json(g, counts) for g in rows],
+        "group_types": [_type_json(t) for t in types],
+    }
+
+
+@router.post("/groups", status_code=status.HTTP_201_CREATED)
+def create_group(
+    payload: GroupRequest,
     context: AuthContext = Depends(require_role(Role.branch_manager)),
     scope: TenantScope = Depends(user_scope),
 ) -> dict:
-    if scope.one_by(Team, name=payload.name) is not None:
-        raise HTTPException(status_code=409, detail=f"A team named '{payload.name}' exists.")
+    kind = scope.get(GroupType, payload.type_id) if payload.type_id else grp.primary_type(scope)
+    if kind is None:
+        raise HTTPException(status_code=404, detail="Grouping not found.")
 
-    branch_id = payload.branch_id
-    if context.role == Role.branch_manager:
-        # A branch manager creates teams inside their own branch, never elsewhere.
-        branch_id = context.membership.branch_id
-    if branch_id is not None and scope.get(Branch, branch_id) is None:
-        raise HTTPException(status_code=404, detail="Branch not found.")
+    parent_id = payload.parent_id
+    if context.role == Role.branch_manager and context.membership.group_id:
+        # A branch manager builds inside their own branch, never elsewhere.
+        parent_id = context.membership.group_id
 
-    team = scope.add(
-        Team(
-            name=payload.name,
-            branch_id=branch_id,
-            lead_name=payload.lead_name,
-            lead_role=payload.lead_role,
+    try:
+        group = grp.create_group(
+            scope, kind.id, payload.name, parent_id=parent_id,
+            lead_name=payload.lead_name, lead_role=payload.lead_role,
         )
-    )
-    scope.flush()
+    except grp.GroupError as exc:
+        raise _refuse_group(exc) from exc
+
     audit.record(
-        scope, "team.create", actor_user_id=context.user.id,
+        scope, "group.create", actor_user_id=context.user.id,
         actor_label=context.user.email, target=payload.name,
+        detail={"type": kind.key},
     )
     scope.commit()
-    return _team_json(team)
+    return _group_json(group)
 
 
-@router.patch("/teams/{team_id}")
-def update_team(
-    team_id: int,
-    payload: TeamRequest,
+@router.patch("/groups/{group_id}")
+def update_group(
+    group_id: int,
+    payload: GroupRequest,
     context: AuthContext = Depends(require_role(Role.team_lead)),
     scope: TenantScope = Depends(user_scope),
     session: Session = Depends(get_session),
 ) -> dict:
-    team = scope.get(Team, team_id)
-    if team is None:
-        raise HTTPException(status_code=404, detail="Team not found.")
-    if not can_edit_team(session, context, team):
-        raise HTTPException(status_code=403, detail="You cannot edit that team.")
+    group = scope.get(Group, group_id)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Group not found.")
+    if not can_edit_group(session, context, group):
+        raise HTTPException(status_code=403, detail="You cannot edit that group.")
 
-    clash = scope.one_by(Team, name=payload.name)
-    if clash is not None and clash.id != team.id:
-        raise HTTPException(status_code=409, detail=f"A team named '{payload.name}' exists.")
-
-    before = _team_json(team)
-    team.name = payload.name
-    team.lead_name = payload.lead_name
-    team.lead_role = payload.lead_role
-    # Moving a team between branches is an org-level decision.
-    if payload.branch_id is not None and context.role in (Role.org_admin, Role.owner):
-        team.branch_id = payload.branch_id
+    before = _group_json(group)
+    # Moving a group under a different parent restructures the company, which
+    # is an org-level decision even though renaming one is not.
+    may_move = context.role in (Role.org_admin, Role.owner)
+    try:
+        grp.update_group(
+            scope, group, payload.name, parent_id=payload.parent_id,
+            lead_name=payload.lead_name, lead_role=payload.lead_role, move=may_move,
+        )
+    except grp.GroupError as exc:
+        raise _refuse_group(exc) from exc
 
     audit.record(
-        scope, "team.update", actor_user_id=context.user.id,
-        actor_label=context.user.email, target=team.name,
-        detail={"before": before, "after": _team_json(team)},
+        scope, "group.update", actor_user_id=context.user.id,
+        actor_label=context.user.email, target=group.name,
+        detail={"before": before, "after": _group_json(group)},
     )
     scope.commit()
-    return _team_json(team)
+    return _group_json(group)
 
 
-class DeleteTeamRequest(BaseModel):
+class DeleteGroupRequest(BaseModel):
     """Where each member goes. A null destination returns them to Unassigned."""
 
     reassign: dict[int, int | None] = Field(default_factory=dict)
 
 
-@router.post("/teams/{team_id}/delete")
-def delete_team(
-    team_id: int,
-    payload: DeleteTeamRequest,
+@router.post("/groups/{group_id}/delete")
+def delete_group(
+    group_id: int,
+    payload: DeleteGroupRequest,
     context: AuthContext = Depends(require_role(Role.org_admin)),
     scope: TenantScope = Depends(user_scope),
 ) -> dict:
-    team = scope.get(Team, team_id)
-    if team is None:
-        raise HTTPException(status_code=404, detail="Team not found.")
+    group = scope.get(Group, group_id)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Group not found.")
 
-    members = [r for r in scope.all(Rep) if r.team_id == team.id]
-    unplaced = [r for r in members if r.id not in payload.reassign]
-    if unplaced:
-        # Deleting a team must never quietly delete or orphan people. The
-        # caller is told exactly who still needs a destination.
+    children = [g for g in scope.all(Group) if g.parent_id == group.id]
+    if children:
+        # Deleting a branch out from under its teams would silently orphan
+        # them, and an orphan is invisible on every board that groups by
+        # branch. Say so instead.
         raise HTTPException(
             status_code=409,
             detail={
-                "error": "Every member needs a destination before this team can be deleted.",
-                "unassigned": [{"id": r.id, "name": r.name} for r in unplaced],
+                "error": "Groups sit inside this one. Move or remove them first.",
+                "children": [{"id": g.id, "name": g.name} for g in children],
             },
         )
 
-    for rep in members:
-        destination = payload.reassign.get(rep.id)
-        if destination is not None and scope.get(Team, destination) is None:
+    members = grp.members_of(scope, group.id)
+    unplaced = [m for m in members if m.rep_id not in payload.reassign]
+    if unplaced:
+        # Deleting a group must never quietly delete or orphan people. The
+        # caller is told exactly who still needs a destination.
+        people = {rep.id: rep.name for rep in scope.all(Rep)}
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "Every member needs a destination before this group can be deleted.",
+                "unassigned": [
+                    {"id": m.rep_id, "name": people.get(m.rep_id, "")} for m in unplaced
+                ],
+            },
+        )
+
+    for membership in members:
+        destination = payload.reassign.get(membership.rep_id)
+        if destination is None:
+            scope.delete(membership)
+            continue
+        target = scope.get(Group, destination)
+        if target is None or target.type_id != group.type_id:
             raise HTTPException(
-                status_code=404, detail=f"Destination team {destination} not found."
+                status_code=404,
+                detail=f"Destination group {destination} is not part of this grouping.",
             )
-        rep.team_id = destination
+        membership.group_id = target.id
 
     audit.record(
-        scope, "team.delete", actor_user_id=context.user.id,
-        actor_label=context.user.email, target=team.name,
+        scope, "group.delete", actor_user_id=context.user.id,
+        actor_label=context.user.email, target=group.name,
         detail={"moved": {str(k): v for k, v in payload.reassign.items()}},
     )
-    scope.delete(team)
+    scope.delete(group)
     scope.commit()
     return {"ok": True, "moved": len(members)}
 
@@ -346,30 +497,69 @@ def delete_team(
 # ---------------------------------------------------------------- people
 @router.get("/reps")
 def list_reps(scope: TenantScope = Depends(user_scope)) -> dict:
-    teams = {t.id: t.name for t in scope.all(Team)}
-    return {
-        "reps": [
+    types = grp.types_for(scope)
+    assignments = grp.memberships_for(scope)
+    direct = {(m.rep_id, m.type_id) for m in scope.all(GroupMembership)}
+    primary = grp.primary_type(scope)
+    primary_key = primary.key if primary else grp.TEAM
+
+    reps = []
+    for rep in scope.all(Rep):
+        mine = assignments.get(rep.id) or {}
+        placed = {
+            kind.key: {
+                "group_id": mine[kind.key].id,
+                "name": mine[kind.key].name,
+                # An inherited group — a branch reached through a team — is
+                # shown but must not look like a choice somebody made here.
+                "inherited": (rep.id, kind.id) not in direct,
+                "source": False,
+            }
+            for kind in types
+            if kind.key in mine
+        }
+
+        # The same fallback the board applies. Without it this page would
+        # report a team as empty while the wall beside it plainly shows twelve
+        # people on it — the console contradicting the product.
+        for key, reported in ((grp.TEAM, rep.source_team), (grp.BRANCH, rep.home_branch)):
+            if key not in placed and reported and any(k.key == key for k in types):
+                placed[key] = {
+                    "group_id": None, "name": reported,
+                    "inherited": False, "source": True,
+                }
+        reps.append(
             {
                 "id": rep.id,
                 "rep_key": rep.rep_key,
                 "name": rep.name,
-                "team_id": rep.team_id,
-                "team": teams.get(rep.team_id) or rep.source_team or "Unassigned",
+                "groups": placed,
+                "group": (
+                    placed.get(primary_key, {}).get("name")
+                    or rep.source_team
+                    or "Unassigned"
+                ),
                 "source_team": rep.source_team,
-                "assigned_locally": rep.team_id is not None,
+                "assigned_locally": not (placed.get(primary_key) or {}).get("source", True),
                 "home_branch": rep.home_branch,
                 "title": rep.title,
             }
-            for rep in scope.all(Rep)
-        ]
+        )
+    return {
+        "reps": reps,
+        "group_types": [_type_json(t) for t in types],
+        "primary_type": primary_key,
     }
 
 
 class AssignRequest(BaseModel):
-    team_id: int | None = None
+    group_id: int | None = None
+    #: Which axis is being set. Omitted means the primary grouping, so the
+    #: common case — moving somebody between teams — stays a one-field call.
+    type_id: int | None = None
 
 
-@router.post("/reps/{rep_id}/team")
+@router.post("/reps/{rep_id}/group")
 def assign_rep(
     rep_id: int,
     payload: AssignRequest,
@@ -377,31 +567,43 @@ def assign_rep(
     scope: TenantScope = Depends(user_scope),
     session: Session = Depends(get_session),
 ) -> dict:
-    """Move a person between teams.
+    """Move a person between groups on one axis.
 
     This is the assignment that outranks the source system. Clearing it hands
-    the person back to whatever team the source reports.
+    the person back to whatever the source reports.
     """
     rep = scope.get(Rep, rep_id)
     if rep is None:
         raise HTTPException(status_code=404, detail="Rep not found.")
 
-    if payload.team_id is not None:
-        team = scope.get(Team, payload.team_id)
-        if team is None:
-            raise HTTPException(status_code=404, detail="Team not found.")
-        if not can_edit_team(session, context, team):
-            raise HTTPException(status_code=403, detail="You cannot assign into that team.")
+    group = None
+    if payload.group_id is not None:
+        group = scope.get(Group, payload.group_id)
+        if group is None:
+            raise HTTPException(status_code=404, detail="Group not found.")
+        if not can_edit_group(session, context, group):
+            raise HTTPException(status_code=403, detail="You cannot assign into that group.")
+        type_id = group.type_id
+    elif payload.type_id is not None:
+        type_id = payload.type_id
+    else:
+        primary = grp.primary_type(scope)
+        if primary is None:
+            raise HTTPException(status_code=409, detail="This organization has no groupings.")
+        type_id = primary.id
 
-    previous = rep.team_id
-    rep.team_id = payload.team_id
+    try:
+        grp.assign(scope, rep, group, type_id)
+    except grp.GroupError as exc:
+        raise _refuse_group(exc) from exc
+
     audit.record(
         scope, "rep.assign", actor_user_id=context.user.id,
         actor_label=context.user.email, target=rep.name,
-        detail={"from_team_id": previous, "to_team_id": payload.team_id},
+        detail={"type_id": type_id, "to_group_id": payload.group_id},
     )
     scope.commit()
-    return {"ok": True, "rep_id": rep.id, "team_id": rep.team_id}
+    return {"ok": True, "rep_id": rep.id, "group_id": payload.group_id, "type_id": type_id}
 
 
 # ---------------------------------------------------------------- board preview
@@ -409,13 +611,15 @@ def assign_rep(
 def board_preview(
     mode: str = Query(default="whole_office"),
     rank_by: str = Query(default="net_split"),
-    team: str = Query(default=""),
-    teams: list[str] = Query(default=[]),
+    group: str = Query(default=""),
+    groups: list[str] = Query(default=[]),
+    group_by: str = Query(default=""),
     period_start: date | None = None,
     period_end: date | None = None,
     scope: TenantScope = Depends(user_scope),
 ) -> dict:
     """The same payload a television gets, for previewing before publishing."""
+    mode = canonical_mode(mode)
     builder = MODES.get(mode)
     if builder is None:
         raise HTTPException(status_code=404, detail=f"Unknown mode '{mode}'.")
@@ -425,12 +629,12 @@ def board_preview(
         if period_start and period_end
         else Period.current_month()
     )
-    rows = rows_for_period(scope, period)
+    rows = rows_for_period(scope, period, group_by=group_by)
 
-    if mode == "per_team":
-        payload = builder(rows, team, rank_by)
-    elif mode == "team_vs_team":
-        payload = builder(rows, teams, rank_by)
+    if mode == "per_group":
+        payload = builder(rows, group, rank_by)
+    elif mode == "group_vs_group":
+        payload = builder(rows, groups, rank_by)
     else:
         payload = builder(rows, rank_by)
 

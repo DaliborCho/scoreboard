@@ -140,7 +140,10 @@ class MetricCatalogue:
 DEFAULT_DEFINITIONS: tuple[MetricDef, ...] = (
     MetricDef("rank", "Rank", "#", "system", role=SYSTEM_ROLE),
     MetricDef("rep_name", "Sales Rep", "REP", "text"),
-    MetricDef("team", "Team", "TEAM", "text"),
+    # Labelled at render time with whatever the board is grouped by --
+    # "Team", "Branch", "Region" -- because that is a choice a customer
+    # makes now rather than a word this file gets to fix.
+    MetricDef("group", "Group", "GROUP", "text"),
     MetricDef("home_branch", "Home Branch", "BRANCH", "text"),
     MetricDef("title", "Title", "TITLE", "text"),
     MetricDef("hire_date", "Hire Date", "HIRED", "text"),

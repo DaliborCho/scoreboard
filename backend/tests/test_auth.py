@@ -6,28 +6,48 @@ forgets the role dependency, which is the mistake that actually happens.
 """
 import pytest
 
-from scoreboard.models import Membership, Role, Team, User, UserSession
+from scoreboard.models import Group, Membership, Role, User, UserSession
 from scoreboard.services.auth import (
     ROLE_RANK,
     AuthContext,
-    can_edit_team,
-    editable_team_ids,
+    can_edit_group,
+    editable_group_ids,
     has_role,
+    subtree,
 )
 
 
-def context(role: Role, *, team_id=None, branch_id=None, org_id=1) -> AuthContext:
+def context(role: Role, *, group_id=None, org_id=1) -> AuthContext:
     return AuthContext(
         user=User(id=1, email="a@b.com", password_hash="x"),
-        membership=Membership(
-            org_id=org_id, user_id=1, role=role, team_id=team_id, branch_id=branch_id
-        ),
+        membership=Membership(org_id=org_id, user_id=1, role=role, group_id=group_id),
         session_row=UserSession(org_id=org_id, user_id=1, prefix="p", token_hash="h"),
     )
 
 
-def team(team_id: int, *, branch_id=None, org_id=1) -> Team:
-    return Team(id=team_id, org_id=org_id, name=f"Team {team_id}", branch_id=branch_id)
+def group(group_id: int, *, parent_id=None, org_id=1, type_id=1) -> Group:
+    return Group(
+        id=group_id, org_id=org_id, type_id=type_id,
+        name=f"Group {group_id}", parent_id=parent_id,
+    )
+
+
+class FakeSession:
+    """Just enough of a session to answer "what groups does this org have".
+
+    The scope rule now reads structure, so the branch-manager cases need
+    something to read. Standing up a database for a pure permission check
+    would make these tests slow enough that people stop running them.
+    """
+
+    def __init__(self, groups):
+        self._groups = groups
+
+    def scalars(self, _statement):
+        return self
+
+    def all(self):
+        return list(self._groups)
 
 
 # ---------------------------------------------------------------- rank
@@ -50,40 +70,67 @@ def test_only_owner_and_admin_reach_org_admin():
 
 
 # ---------------------------------------------------------------- scope
-def test_team_lead_edits_only_their_own_team():
-    lead = context(Role.team_lead, team_id=1)
-    assert can_edit_team(None, lead, team(1))
-    assert not can_edit_team(None, lead, team(2))
+# Branch 7 holds teams 1 and 2; branch 8 holds team 3; team 9 is loose.
+STRUCTURE = [
+    group(7, type_id=2), group(8, type_id=2),
+    group(1, parent_id=7), group(2, parent_id=7),
+    group(3, parent_id=8), group(9),
+]
 
 
-def test_branch_manager_edits_their_branch_only():
-    manager = context(Role.branch_manager, branch_id=7)
-    assert can_edit_team(None, manager, team(1, branch_id=7))
-    assert not can_edit_team(None, manager, team(2, branch_id=8))
-    assert not can_edit_team(None, manager, team(3, branch_id=None))
+def test_team_lead_edits_only_their_own_group():
+    lead = context(Role.team_lead, group_id=1)
+    session = FakeSession(STRUCTURE)
+    assert can_edit_group(session, lead, group(1, parent_id=7))
+    assert not can_edit_group(session, lead, group(2, parent_id=7))
 
 
-def test_org_admin_edits_any_team_in_their_organization():
+def test_branch_manager_reaches_everything_under_their_branch():
+    manager = context(Role.branch_manager, group_id=7)
+    session = FakeSession(STRUCTURE)
+    assert can_edit_group(session, manager, group(1, parent_id=7))
+    assert can_edit_group(session, manager, group(2, parent_id=7))
+    assert not can_edit_group(session, manager, group(3, parent_id=8))
+    assert not can_edit_group(session, manager, group(9))
+
+
+def test_authority_follows_the_chain_however_deep():
+    """A level added later widens a manager's reach without another column."""
+    deep = [*STRUCTURE, group(10, parent_id=1), group(11, parent_id=10)]
+    assert subtree(deep, 7) == {7, 1, 2, 10, 11}
+    assert subtree(deep, 8) == {8, 3}
+
+
+def test_a_cycle_cannot_hang_the_permission_check():
+    """Nothing should create one, but a wall must not stop drawing if it does."""
+    looped = [group(1, parent_id=2), group(2, parent_id=1)]
+    assert subtree(looped, 1) == {1, 2}
+
+
+def test_org_admin_edits_any_group_in_their_organization():
     admin = context(Role.org_admin)
-    assert can_edit_team(None, admin, team(1))
-    assert can_edit_team(None, admin, team(2, branch_id=99))
+    session = FakeSession(STRUCTURE)
+    assert can_edit_group(session, admin, group(1, parent_id=7))
+    assert can_edit_group(session, admin, group(9))
 
 
 def test_no_role_reaches_across_organizations():
     """Rank must never be able to substitute for tenancy."""
+    session = FakeSession(STRUCTURE)
     for role in Role:
-        actor = context(role, team_id=1, branch_id=7, org_id=1)
-        assert not can_edit_team(None, actor, team(1, branch_id=7, org_id=2))
+        actor = context(role, group_id=1, org_id=1)
+        assert not can_edit_group(session, actor, group(1, parent_id=7, org_id=2))
 
 
 def test_viewer_edits_nothing():
-    assert not can_edit_team(None, context(Role.viewer), team(1))
-    assert editable_team_ids(None, context(Role.viewer)) == []
+    session = FakeSession(STRUCTURE)
+    assert not can_edit_group(session, context(Role.viewer, group_id=1), group(1))
+    assert editable_group_ids(session, context(Role.viewer, group_id=1)) == []
 
 
-def test_admin_editable_teams_is_unbounded():
+def test_admin_editable_groups_is_unbounded():
     # None means "all of them", which the API turns into no filter at all.
-    assert editable_team_ids(None, context(Role.org_admin)) is None
+    assert editable_group_ids(None, context(Role.org_admin)) is None
 
 
 # ---------------------------------------------------------------- architecture
@@ -133,7 +180,7 @@ def api_routes():
 def test_the_guard_can_see_the_application():
     """Without this, the check below would pass on an empty list."""
     paths = {path for path, _, _ in api_routes()}
-    assert "/api/v1/teams" in paths
+    assert "/api/v1/groups" in paths
     assert "/api/v1/auth/login" in paths
     assert len(paths) > 15
 

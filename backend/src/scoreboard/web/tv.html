@@ -108,12 +108,12 @@ tfoot td {
   box-shadow: inset 0 0 0 .18vh var(--primary), inset 0 0 4vh rgba(0,0,0,.45);
 }
 
-/* A crest in the team column instead of the team's name repeated in text. */
+/* A crest in the group column instead of the group's name repeated in text. */
 .badge { height: 2.4vh; width: auto; max-width: 3.2vw; object-fit: contain; vertical-align: middle; }
 td.teamcell { text-align: center; }
 .teamdot { display: inline-block; width: 1.1vh; height: 1.1vh; border-radius: 50%; vertical-align: middle; }
 
-/* The leader wears a band of their own team's colour, full width. */
+/* The leader wears a band of their own group's colour, full width. */
 tr.rank1 td { background: var(--leader-band, rgba(255,255,255,.08)); }
 tr.rank1 td.name { font-weight: 800; }
 
@@ -361,36 +361,43 @@ function renderWidget(widget, theme) {
 }
 
 // ---------------------------------------------------------------- modes
-// Rank and the team crest need very little; a name needs enough to be a name.
+// Rank and the group crest need very little; a name needs enough to be a name.
 // Everything else shares what is left.
-const COLUMN_WIDTH = { rank: "3.4vw", rep_name: "14vw", team: "4vw" };
+const COLUMN_WIDTH = { rank: "3.4vw", rep_name: "14vw", group: "4vw" };
 
 function repTable(data, withTotal) {
   const table = el("table");
+  const art = data.group_art || {};
+
+  // A crest needs a narrow column; a name needs a wide one. Which it is
+  // depends on whether every group on this board has artwork, so the width is
+  // decided from the data rather than fixed at four viewport widths -- which
+  // is what turned "West Coast" into "West ..." the moment a customer added a
+  // grouping they had not yet drawn a badge for.
+  const named = (data.reps || []).some(rep => !art[rep.group]);
+  const widths = { ...COLUMN_WIDTH, group: named ? "10vw" : COLUMN_WIDTH.group };
 
   const group = document.createElement("colgroup");
   data.columns.forEach(col => {
     const column = document.createElement("col");
-    if (COLUMN_WIDTH[col]) column.style.width = COLUMN_WIDTH[col];
+    if (widths[col]) column.style.width = widths[col];
     group.appendChild(column);
   });
   table.appendChild(group);
 
   const thead = el("thead"), headRow = el("tr");
   data.columns.forEach(col => {
-    const th = el("th", col === "rep_name" || col === "team" ? "name" : null,
+    const th = el("th", col === "rep_name" || col === "group" ? "name" : null,
                  data.column_short[col] || col);
     if (col === data.rank_by) th.classList.add("tracked");
     headRow.appendChild(th);
   });
   thead.appendChild(headRow);
 
-  const art = data.team_art || {};
-
   const tbody = el("tbody");
   (data.reps || []).forEach(rep => {
     const tr = el("tr");
-    const teamArt = art[rep.team];
+    const teamArt = art[rep.group];
     if (rep.rank === 1) {
       tr.className = "rank1";
       // The leader's band is their own team's colour, not the board's, so a
@@ -402,25 +409,25 @@ function repTable(data, withTotal) {
     data.columns.forEach(col => {
       const kind = data.column_kinds[col];
 
-      if (col === "team") {
+      if (col === "group") {
         const td = el("td", "teamcell");
         if (teamArt && teamArt.badge_url) {
           const badge = document.createElement("img");
           badge.className = "badge";
           badge.src = teamArt.badge_url;
-          badge.alt = rep.team;
-          badge.title = rep.team;
+          badge.alt = rep.group;
+          badge.title = rep.group;
           td.appendChild(badge);
         } else if (teamArt && teamArt.primary) {
           // No crest uploaded yet: a dot in the team colour still groups the
           // table visually, where a repeated word only adds noise.
           const dot = el("span", "teamdot");
           dot.style.background = teamArt.primary;
-          dot.title = rep.team;
+          dot.title = rep.group;
           td.appendChild(dot);
         } else {
           td.className = "name";
-          td.textContent = rep.team;
+          td.textContent = rep.group;
         }
         tr.appendChild(td);
         return;
@@ -441,7 +448,7 @@ function repTable(data, withTotal) {
     const tfoot = el("tfoot"), row = el("tr");
     data.columns.forEach((col, i) => {
       const td = el("td", col === "rep_name" ? "name" : null);
-      if (i === 0 || col === "team") {
+      if (i === 0 || col === "group") {
         td.textContent = "";
       } else if (col === "rep_name") {
         td.textContent = "TOTAL";
@@ -469,7 +476,7 @@ function teamCard(entry, data, showMvp) {
 
   const top = el("div", "top");
   const names = el("div");
-  names.appendChild(el("div", "teamname", entry.team));
+  names.appendChild(el("div", "teamname", entry.group));
   if (entry.lead_name) names.appendChild(el("div", "teamlead", entry.lead_name));
   top.appendChild(names);
   top.appendChild(el("div", "placement", entry.placement || (entry.rank ? "#" + entry.rank : "")));
@@ -502,19 +509,19 @@ function renderMain(data) {
   const main = $("main");
   main.innerHTML = "";
 
-  if (data.mode === "whole_office" || data.mode === "per_team") {
+  if (data.mode === "whole_office" || data.mode === "per_group") {
     main.appendChild(repTable(data, true));
     return;
   }
 
   const grid = el("div", "grid");
-  const teams = data.teams || [];
+  const teams = data.groups || [];
   grid.style.gridTemplateColumns = `repeat(${Math.min(Math.max(teams.length, 1), 4)}, 1fr)`;
   if (teams.length > 4) grid.style.gridTemplateRows = "repeat(2, 1fr)";
 
   teams.forEach(entry => {
-    const card = teamCard(entry, data, data.mode === "all_teams");
-    if (data.mode === "team_vs_team" && entry.members) {
+    const card = teamCard(entry, data, data.mode === "all_groups");
+    if (data.mode === "group_vs_group" && entry.members) {
       const list = el("div");
       list.style.cssText = "display:flex;flex-direction:column;gap:.35vh;margin-top:.5vh;min-height:0;overflow:hidden";
       entry.members.forEach(member => {

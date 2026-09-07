@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from scoreboard.api.deps import require_role, user_scope
 from scoreboard.db import get_session
-from scoreboard.models import Branch, Membership, Role, Team, User
+from scoreboard.models import Group, Membership, Role, User
 from scoreboard.services import audit
 from scoreboard.services.auth import AuthContext, create_user, revoke_all_for_user
 from scoreboard.tenancy import TenantScope
@@ -34,16 +34,17 @@ class InviteRequest(BaseModel):
     email: EmailStr
     full_name: str = ""
     role: Role = Role.viewer
-    branch_id: int | None = None
-    team_id: int | None = None
+    #: Which part of the company this person's authority covers. A branch
+    #: manager holds a branch, a team lead a team; one column, because it is
+    #: one question, and authority reaches everything beneath it.
+    group_id: int | None = None
     # Left blank, one is generated and shown once.
     password: str = Field(default="", max_length=200, min_length=0)
 
 
 class MembershipUpdate(BaseModel):
     role: Role
-    branch_id: int | None = None
-    team_id: int | None = None
+    group_id: int | None = None
 
 
 def _membership_json(membership: Membership, user: User) -> dict:
@@ -53,8 +54,7 @@ def _membership_json(membership: Membership, user: User) -> dict:
         "email": user.email,
         "full_name": user.full_name,
         "role": membership.role.value,
-        "branch_id": membership.branch_id,
-        "team_id": membership.team_id,
+        "group_id": membership.group_id,
         "is_active": user.is_active,
     }
 
@@ -76,11 +76,9 @@ def _owner_count(scope: TenantScope) -> int:
     return sum(1 for m in scope.all(Membership) if m.role == Role.owner)
 
 
-def _check_scope(scope: TenantScope, branch_id: int | None, team_id: int | None) -> None:
-    if branch_id is not None and scope.get(Branch, branch_id) is None:
-        raise HTTPException(status_code=404, detail="Branch not found.")
-    if team_id is not None and scope.get(Team, team_id) is None:
-        raise HTTPException(status_code=404, detail="Team not found.")
+def _check_scope(scope: TenantScope, group_id: int | None) -> None:
+    if group_id is not None and scope.get(Group, group_id) is None:
+        raise HTTPException(status_code=404, detail="Group not found.")
 
 
 @router.get("")
@@ -108,7 +106,7 @@ def add_person(
         # sideways into ownership is the obvious escalation path.
         raise HTTPException(status_code=403, detail="Only an owner can create another owner.")
 
-    _check_scope(scope, payload.branch_id, payload.team_id)
+    _check_scope(scope, payload.group_id)
 
     email = payload.email.strip().lower()
     user = session.scalars(select(User).where(User.email == email)).first()
@@ -133,8 +131,7 @@ def add_person(
         Membership(
             user_id=user.id,
             role=payload.role,
-            branch_id=payload.branch_id,
-            team_id=payload.team_id,
+            group_id=payload.group_id,
         )
     )
     scope.flush()
@@ -174,12 +171,11 @@ def update_person(
             detail="This is the last owner. Promote someone else first, or the "
                    "organization would be left with nobody who can.",
         )
-    _check_scope(scope, payload.branch_id, payload.team_id)
+    _check_scope(scope, payload.group_id)
 
     before = membership.role.value
     membership.role = payload.role
-    membership.branch_id = payload.branch_id
-    membership.team_id = payload.team_id
+    membership.group_id = payload.group_id
 
     user = session.get(User, membership.user_id)
     audit.record(

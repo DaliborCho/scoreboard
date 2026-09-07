@@ -269,6 +269,7 @@ footer {
     <li><a href="#tenancy">Tenancy</a></li>
     <li><a href="#in">Getting data in</a></li>
     <li><a href="#ownership">The ownership split</a></li>
+    <li><a href="#structure">Groupings</a></li>
     <li><a href="#arithmetic">The arithmetic rule</a></li>
     <li><a href="#board">Data to a board</a></li>
     <li><a href="#look">Themes and artwork</a></li>
@@ -286,18 +287,18 @@ footer {
   <h1>Scoreboard, from source to wall</h1>
   <p class="standfirst">
     A multi-tenant sales leaderboard. Numbers arrive from a customer's reporting
-    system; the platform owns the teams, the look, and the screens on the office
+    system; the platform owns the structure, the look, and the screens on the office
     televisions. This is how the parts fit together, and which of them exist to
     stop something going wrong.
   </p>
 
   <dl class="facts">
-    <div><dt>API routes</dt><dd>64</dd></div>
-    <div><dt>Tables</dt><dd>15</dd></div>
+    <div><dt>API routes</dt><dd>76</dd></div>
+    <div><dt>Tables</dt><dd>17</dd></div>
     <div><dt>Connectors</dt><dd>4</dd></div>
     <div><dt>Board modes</dt><dd>4</dd></div>
     <div><dt>Chart types</dt><dd>6</dd></div>
-    <div><dt>Tests</dt><dd>122</dd></div>
+    <div><dt>Tests</dt><dd>157</dd></div>
   </dl>
 </header>
 
@@ -344,7 +345,7 @@ footer {
 
           <rect x="30" y="140" width="240" height="62" rx="8" fill="var(--sunken)" stroke="var(--line)"/>
           <text class="t-title" x="46" y="166">Company staff</text>
-          <text class="t-sub" x="46" y="186">/console &middot; teams, look, screens</text>
+          <text class="t-sub" x="46" y="186">/console &middot; structure, look, screens</text>
 
           <rect x="30" y="236" width="240" height="62" rx="8" fill="var(--sunken)" stroke="var(--line)"/>
           <text class="t-title" x="46" y="262">Television</text>
@@ -505,11 +506,11 @@ footer {
 
         <rect x="672" y="46" width="176" height="52" rx="8" fill="var(--sunken)" stroke="var(--line)"/>
         <text class="t-title" x="688" y="68">org 1 rows</text>
-        <text class="t-sub" x="688" y="86">12 reps &middot; 5 teams</text>
+        <text class="t-sub" x="688" y="86">12 reps &middot; 5 groups</text>
 
         <rect x="672" y="120" width="176" height="52" rx="8" fill="var(--sunken)" stroke="var(--line)"/>
         <text class="t-title" x="688" y="142">org 2 rows</text>
-        <text class="t-sub" x="688" y="160">4 reps &middot; 2 teams</text>
+        <text class="t-sub" x="688" y="160">4 reps &middot; 2 groups</text>
 
         <rect x="672" y="248" width="330" height="74" rx="8" fill="var(--gold-soft)" stroke="var(--gold)"/>
         <text class="t-title" x="688" y="272" fill="var(--gold)">Platform routes only</text>
@@ -611,7 +612,7 @@ footer {
         <text class="t-title" x="776" y="102">One refresh path</text>
         <text class="t-sub" x="776" y="122">creates people it has not seen</text>
         <text class="t-sub" x="776" y="140">writes today's figures</text>
-        <text class="t-sub" x="776" y="156">never touches team assignments</text>
+        <text class="t-sub" x="776" y="156">never touches group assignments</text>
 
         <rect x="760" y="192" width="290" height="82" rx="8" fill="var(--sunken)" stroke="var(--line)"/>
         <text class="t-title" x="776" y="218">rep_metrics</text>
@@ -686,7 +687,7 @@ footer {
         <text class="t-sub" x="396" y="150">overwritten &mdash; today's figures</text>
 
         <rect x="380" y="196" width="250" height="76" rx="8" fill="var(--gold-soft)" stroke="var(--gold)" stroke-width="1.6"/>
-        <text class="t-title" x="396" y="220" fill="var(--gold)">team assignment</text>
+        <text class="t-title" x="396" y="220" fill="var(--gold)">group assignment</text>
         <text class="t-sub" x="396" y="240" fill="var(--gold)">set by a person in the console</text>
         <text class="t-sub" x="396" y="258" fill="var(--gold)">survives every refresh, for ever</text>
 
@@ -719,11 +720,138 @@ footer {
     </div>
     <figcaption>
       <b>The arrow that is deliberately absent.</b> A person moved to another
-      team stays there through every refresh, which is what lets a sales manager
-      reorganise the floor without asking anyone to change a report. Teams,
-      leads, themes and screens all sit on this side of the line.
+      group stays there through every refresh, which is what lets a sales
+      manager reorganise the floor without asking anyone to change a report.
+      Groups, leads, themes and screens all sit on this side of the line.
     </figcaption>
   </figure>
+</section>
+
+<!-- ============================================================ structure -->
+<section id="structure">
+  <p class="layer">The second rule</p>
+  <h2>A company is divided along axes it chooses, not the two we guessed.</h2>
+  <p>
+    There used to be a <code>teams</code> table and a <code>branches</code>
+    table. That answered the two questions we had thought of and none of the
+    ones customers actually ask &mdash; compare regions, compare product lines,
+    compare the people hired this year against last. Each of those needed a
+    third table and a release.
+  </p>
+  <p>
+    A <strong>group type</strong> is a row now. Teams and branches ship with
+    every organization because the roles name them, but they are instances of
+    the idea rather than the idea itself. Everything downstream reads group
+    types, so a grouping a customer invents on a Tuesday afternoon works on the
+    boards, the charts, the themes and the permission checks the moment it
+    exists.
+  </p>
+
+  <figure>
+    <div class="plate">
+      <svg viewBox="0 0 1000 340" role="img" class="dg"
+           aria-label="Group types team, branch and region each hold groups; a person is assigned to one group per type, and a branch is inherited from the team above it.">
+        <defs>
+          <marker id="a9" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+          </marker>
+          <marker id="a9g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--gold)"/>
+          </marker>
+        </defs>
+
+        <text class="t-sub" x="24" y="28">GROUP TYPES &mdash; rows, not tables</text>
+
+        <g class="node">
+          <rect x="24" y="44" width="180" height="52" rx="10"/>
+          <text class="t-title" x="44" y="70">Branch</text>
+          <text class="t-sub" x="44" y="86">ships with the product</text>
+        </g>
+        <g class="node">
+          <rect x="24" y="112" width="180" height="52" rx="10"/>
+          <text class="t-title" x="44" y="138">Team</text>
+          <text class="t-sub" x="44" y="154">ships &middot; boards group by it</text>
+        </g>
+        <g class="node accent">
+          <rect x="24" y="180" width="180" height="52" rx="10"/>
+          <text class="t-title" x="44" y="206" fill="var(--gold)">Region</text>
+          <text class="t-sub" x="44" y="222">added by the customer</text>
+        </g>
+
+        <text class="t-sub" x="272" y="28">GROUPS</text>
+
+        <g class="node">
+          <rect x="272" y="44" width="170" height="52" rx="10"/>
+          <text class="t-title" x="292" y="76">Olympia</text>
+        </g>
+        <g class="node">
+          <rect x="272" y="112" width="170" height="52" rx="10"/>
+          <text class="t-title" x="292" y="138">Team Alpha</text>
+          <text class="t-sub" x="292" y="154">inside Olympia</text>
+        </g>
+        <g class="node accent">
+          <rect x="272" y="180" width="170" height="52" rx="10"/>
+          <text class="t-title" x="292" y="212" fill="var(--gold)">West Coast</text>
+        </g>
+
+        <path d="M204 70 H272" stroke="currentColor" stroke-width="1.6" marker-end="url(#a9)"/>
+        <path d="M204 138 H272" stroke="currentColor" stroke-width="1.6" marker-end="url(#a9)"/>
+        <path d="M204 206 H272" stroke="var(--gold)" stroke-width="1.6" marker-end="url(#a9g)"/>
+
+        <path d="M357 112 V96" stroke="var(--gold)" stroke-width="1.6" marker-end="url(#a9g)"/>
+        <text class="t-edge" x="368" y="106" fill="var(--gold)">inside</text>
+
+        <g class="node">
+          <rect x="512" y="112" width="180" height="52" rx="10"/>
+          <text class="t-title" x="532" y="138">Ana</text>
+          <text class="t-sub" x="532" y="154">one group per type</text>
+        </g>
+        <path d="M442 138 H512" stroke="currentColor" stroke-width="1.6" marker-end="url(#a9)"/>
+        <path d="M442 206 C480 206 480 152 512 146" fill="none" stroke="var(--gold)"
+              stroke-width="1.6" marker-end="url(#a9g)"/>
+
+        <g class="node">
+          <rect x="756" y="60" width="220" height="60" rx="10"/>
+          <text class="t-sub" x="776" y="84">assigned</text>
+          <text class="t-title" x="776" y="104">team &rarr; Team Alpha</text>
+        </g>
+        <g class="node">
+          <rect x="756" y="136" width="220" height="60" rx="10"/>
+          <text class="t-sub" x="776" y="160">inherited from the team</text>
+          <text class="t-title" x="776" y="180">branch &rarr; Olympia</text>
+        </g>
+        <g class="node accent">
+          <rect x="756" y="212" width="220" height="60" rx="10"/>
+          <text class="t-sub" x="776" y="236">assigned</text>
+          <text class="t-title" x="776" y="256" fill="var(--gold)">region &rarr; West Coast</text>
+        </g>
+        <path d="M692 132 C724 132 724 96 756 92" fill="none" stroke="currentColor"
+              stroke-width="1.6" marker-end="url(#a9)"/>
+        <path d="M692 142 H756" stroke="currentColor" stroke-width="1.6" marker-end="url(#a9)"/>
+        <path d="M692 152 C724 152 724 236 756 240" fill="none" stroke="var(--gold)"
+              stroke-width="1.6" marker-end="url(#a9g)"/>
+
+        <text class="t-sub" x="24" y="300">One group per person per type is a unique constraint, not a convention.</text>
+        <text class="t-sub" x="24" y="320">A branch is never stored twice, so a team and its branch cannot disagree.</text>
+      </svg>
+    </div>
+    <figcaption>
+      <b>Assigned once, true on every axis.</b> Ana is put on Team Alpha; Team
+      Alpha sits inside Olympia, so Ana is in Olympia without anybody saying so
+      twice. A direct assignment still beats an inherited one, which is how one
+      person seconded to another office stays possible. The same chain carries
+      authority: a branch manager holds a branch and reaches everything beneath
+      it, so adding a level later widens their scope instead of needing another
+      column.
+    </figcaption>
+  </figure>
+
+  <p>
+    A board is grouped along one axis and still carries all of them. That is
+    what lets a screen ranked by team sit beside a chart broken down by branch,
+    from one query &mdash; and why a chart is refused if it names an axis the
+    rows do not carry, rather than drawing an empty picture on a wall.
+  </p>
 </section>
 
 <!-- ============================================================ arithmetic -->
@@ -828,11 +956,11 @@ footer {
         <rect x="486" y="56" width="200" height="46" rx="7" fill="var(--sunken)" stroke="var(--line)"/>
         <text class="t-title" x="500" y="84">Whole office</text>
         <rect x="486" y="114" width="200" height="46" rx="7" fill="var(--sunken)" stroke="var(--line)"/>
-        <text class="t-title" x="500" y="142">Per team</text>
+        <text class="t-title" x="500" y="142">Per group</text>
         <rect x="486" y="172" width="200" height="46" rx="7" fill="var(--sunken)" stroke="var(--line)"/>
-        <text class="t-title" x="500" y="200">Team vs team</text>
+        <text class="t-title" x="500" y="200">Group vs group</text>
         <rect x="486" y="230" width="200" height="46" rx="7" fill="var(--sunken)" stroke="var(--line)"/>
-        <text class="t-title" x="500" y="258">All teams</text>
+        <text class="t-title" x="500" y="258">All groups</text>
 
         <rect x="486" y="300" width="200" height="66" rx="7" fill="var(--gold-soft)" stroke="var(--gold)"/>
         <text class="t-title" x="500" y="324" fill="var(--gold)">Rotation</text>
@@ -1220,10 +1348,12 @@ footer {
         </tr>
         <tr>
           <td>Company</td>
-          <td>Branches &middot; teams with leads and roles &middot; move people
-              between teams &middot; delete a team only once every member has a
-              destination &middot; accounts, roles and scopes &middot; password
-              change and admin reset &middot; audit log</td>
+          <td>Group types a customer defines &mdash; teams and branches ship,
+              regions and product lines are a form &middot; groups with leads and
+              roles, nested inside one another &middot; move people on any axis
+              &middot; delete a group only once every member has a destination
+              &middot; accounts, roles and scopes &middot; password change and
+              admin reset &middot; audit log</td>
         </tr>
         <tr>
           <td>Data</td>
@@ -1234,21 +1364,23 @@ footer {
         </tr>
         <tr>
           <td>Boards</td>
-          <td>Four modes &middot; six chart types &middot; chosen columns &middot;
-              ranking metric &middot; rotation across screens &middot; preview
-              that is the board itself &middot; revocable and re-issuable links</td>
+          <td>Four modes, each along whichever axis the screen names &middot;
+              six chart types, groupable by a different axis than the board
+              &middot; chosen columns &middot; ranking metric &middot; rotation
+              across screens &middot; preview that is the board itself &middot;
+              revocable and re-issuable links</td>
         </tr>
         <tr>
           <td>Look</td>
           <td>Six colour tokens &middot; six fonts &middot; frame styles &middot;
-              hero, badge, logo and background artwork &middot; per-team
+              hero, badge, logo and background artwork &middot; per-group
               overrides inheriting the company brand &middot; contrast enforced
               on save</td>
         </tr>
         <tr>
           <td>Console</td>
-          <td>Home dashboard with office totals and team comparison charts
-              &middot; a page per team with its own statistics &middot; live
+          <td>Home dashboard with office totals and group comparison charts
+              &middot; a page per group with its own statistics &middot; live
               board &middot; people &middot; screens and widget builder &middot;
               displays and rotation</td>
         </tr>

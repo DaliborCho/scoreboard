@@ -8,7 +8,7 @@ makes this file the place to be most careful, so:
 * every route sits behind `superadmin_only` and nothing else reaches it;
 * the flag lives on the account, not in `Role`, so the per-organization
   permission model is not quietly widened to include "and also everyone";
-* nothing here reads or writes a customer's *contents* — teams, people,
+* nothing here reads or writes a customer's *contents* — groups, people,
   metrics. It creates, renames, suspends and counts. Looking inside a
   customer's data means being given an account there, which is auditable.
 """
@@ -28,12 +28,12 @@ from scoreboard.models import (
     ApiKey,
     DataSource,
     DisplayToken,
+    Group,
     Membership,
     Organization,
     Rep,
     Role,
     Screen,
-    Team,
     User,
 )
 from scoreboard.services.auth import AuthContext, create_user, revoke_all_for_user
@@ -81,7 +81,7 @@ def _counts(session: Session, org_id: int) -> dict:
         ) or 0
 
     return {
-        "teams": count(Team),
+        "groups": count(Group),
         "reps": count(Rep),
         "people": count(Membership),
         "displays": count(DisplayToken),
@@ -130,6 +130,14 @@ def create_organization(
     org = Organization(name=payload.name.strip(), slug=slug)
     session.add(org)
     session.commit()
+
+    # Give the new customer the two shipped groupings straight away. Without
+    # them their first screen would have nothing to group by, and the console
+    # would show an empty structure page with no way to start.
+    from scoreboard.services.groups import ensure_types
+    from scoreboard.tenancy import TenantScope
+
+    ensure_types(TenantScope(session, org.id))
 
     handle = (payload.owner_username or "").strip().lower()
     email = (payload.owner_email or "").strip().lower() or f"owner@{slug}.invalid"
@@ -202,7 +210,7 @@ def delete_organization(
     if payload.confirm_slug.strip() != org.slug:
         raise HTTPException(
             status_code=422,
-            detail=f"Type '{org.slug}' to confirm. This removes every team, person, "
+            detail=f"Type '{org.slug}' to confirm. This removes every group, person, "
                    "screen and figure belonging to them.",
         )
 
@@ -228,7 +236,7 @@ def platform_stats(
             select(func.count()).select_from(Organization).where(Organization.is_active.is_(True))
         ) or 0,
         "users": total(User),
-        "teams": total(Team),
+        "groups": total(Group),
         "reps": total(Rep),
         "displays": total(DisplayToken),
         "screens": total(Screen),

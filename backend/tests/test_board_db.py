@@ -94,7 +94,8 @@ def test_a_board_reads_back_what_a_refresh_wrote(org):
     assert ana["issued_leads"] == 40
     # Derived on the way out, never stored.
     assert ana["close_rate"] == 25.0
-    assert ana["team"] == "Alpha"
+    # No local assignment yet, so the source's word stands in.
+    assert ana["group"] == "Alpha"
 
 
 def test_the_summing_rule_survives_the_database(org):
@@ -172,23 +173,28 @@ def test_one_organization_cannot_read_another(org):
         session.close()
 
 
-def test_a_refresh_never_moves_someone_between_teams(org):
+def test_a_refresh_never_moves_someone_between_groups(org):
     """The product's first rule, checked against real stored rows."""
-    from scoreboard.models import Rep, Team
+    from scoreboard.connectors.base import Period
+    from scoreboard.models import Rep
+    from scoreboard.services import groups as grp
+    from scoreboard.services.board import rows_for_period
 
     _load(org, [("a", "Ana", "Alpha", {"issued_leads": 10})])
 
-    bravo = org.add(Team(name="Bravo"))
-    org.flush()
+    team_type = grp.type_by_key(org, grp.TEAM)
+    bravo = grp.create_group(org, team_type.id, "Bravo")
     rep = org.one_by(Rep, rep_key="a")
-    rep.team_id = bravo.id
+    grp.assign(org, rep, bravo, team_type.id)
     org.commit()
 
+    # The source keeps insisting on Alpha. It does not get to win.
     _load(org, [("a", "Ana", "Alpha", {"issued_leads": 99})])
 
-    rep = org.one_by(Rep, rep_key="a")
-    assert rep.team_id == bravo.id, "a refresh must never rewrite a team assignment"
-    assert rep.source_team == "Alpha"
+    rows = rows_for_period(org, Period.current_month(date(2026, 9, 15)))
+    assert rows[0]["group"] == "Bravo", "a refresh must never rewrite an assignment"
+    assert rows[0]["issued_leads"] == 99, "but the figures do follow the source"
+    assert org.one_by(Rep, rep_key="a").source_team == "Alpha"
 
 
 def test_a_partial_update_does_not_empty_the_board(org):

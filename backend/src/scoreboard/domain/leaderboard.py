@@ -1,8 +1,13 @@
-"""Leaderboard assembly: ranking, team roll-ups and the display modes.
+"""Leaderboard assembly: ranking, group roll-ups and the display modes.
 
 Pure functions over plain dictionaries. Nothing here touches the database, the
 web framework or any source system, so the rules can be tested directly and
 reused by every screen.
+
+Rows carry `group`, not `team`. Which axis that is — team, branch, region, or
+something a customer invented — is decided when the rows are read, so the same
+four modes serve every grouping instead of the one the code happened to know
+about.
 """
 from __future__ import annotations
 
@@ -17,7 +22,12 @@ UNASSIGNED = "Unassigned"
 class RepRow:
     rep_key: str
     rep_name: str
-    team: str = UNASSIGNED
+    #: The grouping in effect for this board.
+    group: str = UNASSIGNED
+    #: Every axis this person sits on, keyed by group type. Carried so a chart
+    #: can break down by branch while the board beside it is ranked by team,
+    #: off one set of rows rather than a second query.
+    groups: dict[str, str] = field(default_factory=dict)
     home_branch: str = ""
     title: str = ""
     hire_date: str = ""
@@ -27,7 +37,8 @@ class RepRow:
         row = {
             "rep_key": self.rep_key,
             "rep_name": self.rep_name,
-            "team": self.team,
+            "group": self.group,
+            "groups": dict(self.groups),
             "home_branch": self.home_branch,
             "title": self.title,
             "hire_date": self.hire_date,
@@ -61,24 +72,34 @@ def rank(rows: list[dict], metric: str,
     return ordered
 
 
-def group_by_team(rows: list[dict]) -> dict[str, list[dict]]:
-    groups: dict[str, list[dict]] = {}
+def split_by_group(rows: list[dict], axis: str = "") -> dict[str, list[dict]]:
+    """Bucket rows by the grouping in effect, or by a named axis instead.
+
+    Passing an axis is what lets a board ranked by team carry a chart broken
+    down by branch, from the same rows.
+    """
+    buckets: dict[str, list[dict]] = {}
     for row in rows:
-        groups.setdefault(row.get("team") or UNASSIGNED, []).append(row)
-    return groups
+        if axis:
+            name = (row.get("groups") or {}).get(axis) or UNASSIGNED
+        else:
+            name = row.get("group") or UNASSIGNED
+        buckets.setdefault(name, []).append(row)
+    return buckets
 
 
-def team_totals(rows: list[dict], metric: str,
-                metrics: MetricCatalogue = DEFAULT_CATALOGUE) -> list[dict]:
-    """One totalled entry per team, ranked by the same metric as the reps."""
+def group_totals(rows: list[dict], metric: str,
+                 metrics: MetricCatalogue = DEFAULT_CATALOGUE,
+                 axis: str = "") -> list[dict]:
+    """One totalled entry per group, ranked by the same metric as the reps."""
     totals = []
-    for team_name, members in group_by_team(rows).items():
-        entry = {"team": team_name, "rep_count": len(members)}
+    for name, members in split_by_group(rows, axis).items():
+        entry = {"group": name, "rep_count": len(members)}
         entry.update(metrics.roll_up(members))
         entry["members"] = rank(members, metric, metrics)
         totals.append(entry)
 
-    ordered = sorted(totals, key=lambda t: (float(t.get(metric) or 0), t["team"]), reverse=True)
+    ordered = sorted(totals, key=lambda t: (float(t.get(metric) or 0), t["group"]), reverse=True)
     for position, entry in enumerate(ordered, start=1):
         entry["rank"] = position
     return ordered
@@ -96,48 +117,61 @@ def whole_office(rows: list[dict], metric: str = "net_split",
     }
 
 
-def per_team(rows: list[dict], team: str, metric: str = "net_split",
-             metrics: MetricCatalogue = DEFAULT_CATALOGUE) -> dict:
-    members = [r for r in rows if (r.get("team") or UNASSIGNED) == team]
+def per_group(rows: list[dict], group: str, metric: str = "net_split",
+              metrics: MetricCatalogue = DEFAULT_CATALOGUE) -> dict:
+    members = [r for r in rows if (r.get("group") or UNASSIGNED) == group]
     ranked = rank(members, metric, metrics)
     return {
-        "mode": "per_team",
+        "mode": "per_group",
         "rank_by": metric,
-        "team": team,
+        "group": group,
         "reps": ranked,
         "total": metrics.roll_up(ranked),
     }
 
 
-def team_vs_team(rows: list[dict], teams: list[str], metric: str = "net_split",
-                 metrics: MetricCatalogue = DEFAULT_CATALOGUE) -> dict:
-    """Head-to-head between exactly two teams.
+def group_vs_group(rows: list[dict], names: list[str], metric: str = "net_split",
+                   metrics: MetricCatalogue = DEFAULT_CATALOGUE) -> dict:
+    """Head-to-head between exactly two groups.
 
     The limit is deliberate and enforced here rather than in the UI: the
-    layout is a two-column scoreboard, and a third team has nowhere to go.
+    layout is a two-column scoreboard, and a third group has nowhere to go.
     """
-    selected = [t for t in teams if t][:2]
-    totals = [t for t in team_totals(rows, metric, metrics) if t["team"] in selected]
-    ordered = sorted(totals, key=lambda t: selected.index(t["team"]))
+    selected = [name for name in names if name][:2]
+    totals = [t for t in group_totals(rows, metric, metrics) if t["group"] in selected]
+    ordered = sorted(totals, key=lambda t: selected.index(t["group"]))
     ordered = sorted(ordered, key=lambda t: float(t.get(metric) or 0), reverse=True)
     for position, entry in enumerate(ordered, start=1):
         entry["placement"] = "WINNER" if position == 1 else ""
-    return {"mode": "team_vs_team", "rank_by": metric, "teams": ordered}
+    return {"mode": "group_vs_group", "rank_by": metric, "groups": ordered}
 
 
-def all_teams(rows: list[dict], metric: str = "net_split",
-                 metrics: MetricCatalogue = DEFAULT_CATALOGUE) -> dict:
-    """Team cards with an MVP each: the top rep on that team by the same metric."""
-    totals = team_totals(rows, metric, metrics)
+def all_groups(rows: list[dict], metric: str = "net_split",
+               metrics: MetricCatalogue = DEFAULT_CATALOGUE) -> dict:
+    """Group cards with an MVP each: the top rep inside by the same metric."""
+    totals = group_totals(rows, metric, metrics)
     for entry in totals:
         members = entry.get("members") or []
         entry["mvp"] = members[0] if members else None
-    return {"mode": "all_teams", "rank_by": metric, "teams": totals}
+    return {"mode": "all_groups", "rank_by": metric, "groups": totals}
 
 
 MODES = {
     "whole_office": whole_office,
-    "per_team": per_team,
-    "team_vs_team": team_vs_team,
-    "all_teams": all_teams,
+    "per_group": per_group,
+    "group_vs_group": group_vs_group,
+    "all_groups": all_groups,
 }
+
+#: Screens saved while `team` was the only axis the product had. Kept so a
+#: customer's existing walls keep drawing after the upgrade rather than
+#: raising "unknown mode" at a television nobody is standing next to.
+LEGACY_MODES = {
+    "per_team": "per_group",
+    "team_vs_team": "group_vs_group",
+    "all_teams": "all_groups",
+}
+
+
+def canonical_mode(mode: str) -> str:
+    return LEGACY_MODES.get(mode, mode or "whole_office")

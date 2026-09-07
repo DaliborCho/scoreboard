@@ -29,7 +29,7 @@ class ChartType:
 
 CHART_TYPES: tuple[ChartType, ...] = (
     ChartType("big_number", "Big number", "One total, as large as the space allows."),
-    ChartType("bar", "Bar", "Compare a metric across teams or reps.", needs_group=True),
+    ChartType("bar", "Bar", "Compare a metric across groups or reps.", needs_group=True),
     ChartType("donut", "Donut", "Share of a total. Additive metrics only.", needs_group=True),
     ChartType("trend", "Trend", "How a metric moved across the period, day by day."),
     ChartType("gauge", "Gauge", "Progress toward a target.", accepts_target=True),
@@ -50,7 +50,14 @@ class ChartError(ValueError):
 
 
 def validate_widget(widget: dict,
-                    metrics: MetricCatalogue = DEFAULT_CATALOGUE) -> list[str]:
+                    metrics: MetricCatalogue = DEFAULT_CATALOGUE,
+                    axes: tuple[str, ...] = ()) -> list[str]:
+    """Everything wrong with a widget definition, in the customer's words.
+
+    `axes` are the group types this organization actually has. Passing them is
+    what lets "group by region" be accepted here without this module knowing
+    that regions exist.
+    """
     problems = []
     chart = CHART_BY_KEY.get(str(widget.get("type") or ""))
     if chart is None:
@@ -60,9 +67,13 @@ def validate_widget(widget: dict,
     if metric not in metrics.rankable:
         problems.append(f"'{metric}' cannot be charted.")
 
-    group_by = str(widget.get("group_by") or "team")
-    if chart.needs_group and group_by not in ("team", "rep"):
-        problems.append("Group by 'team' or 'rep'.")
+    # "group" means whichever axis the board itself is grouped by. A named
+    # axis -- branch, region -- breaks the same rows down a different way, so a
+    # board ranked by team can carry a chart of branches beside it.
+    group_by = str(widget.get("group_by") or "group")
+    allowed = ("group", "rep", *axes)
+    if chart.needs_group and group_by not in allowed:
+        problems.append(f"Group by one of: {', '.join(allowed)}.")
 
     if chart.key == "donut" and metric not in share_safe(metrics):
         problems.append(
@@ -89,7 +100,11 @@ def _grouped(rows: list[dict], group_by: str, metric: str,
 
     buckets: dict[str, list[dict]] = {}
     for row in rows:
-        buckets.setdefault(row.get("team") or "Unassigned", []).append(row)
+        if group_by == "group":
+            name = row.get("group")
+        else:
+            name = (row.get("groups") or {}).get(group_by)
+        buckets.setdefault(name or "Unassigned", []).append(row)
     # Totalled through the shared roll-up so a bar equals its table column.
     return [
         {
@@ -108,14 +123,24 @@ def build(widget: dict, rows: list[dict], trend_points: list[dict] | None = None
     silently shows zero is worse on a wall than a chart that is obviously
     misconfigured.
     """
-    problems = validate_widget(widget, metrics)
+    # The axes are read off the rows rather than passed in, because the rows
+    # are the only honest answer to "what can this be grouped by": a chart
+    # cannot break figures down along an axis the figures do not carry.
+    axes = tuple(sorted({key for row in rows for key in (row.get("groups") or {})}))
+    if not rows:
+        # Nothing to compute and nothing to contradict. Refusing here would put
+        # a configuration error on a wall whose only real problem is an empty
+        # month.
+        axes = (str(widget.get("group_by") or ""),)
+
+    problems = validate_widget(widget, metrics, axes)
     if problems:
         raise ChartError("; ".join(problems))
 
     chart = CHART_BY_KEY[widget["type"]]
     metric = widget["metric"]
     definition = metrics.by_key[metric]
-    group_by = str(widget.get("group_by") or "team")
+    group_by = str(widget.get("group_by") or "group")
     limit = int(widget.get("limit") or MAX_SERIES)
 
     payload = {

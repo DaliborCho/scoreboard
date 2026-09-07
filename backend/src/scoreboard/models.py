@@ -6,7 +6,12 @@ cross-tenant readable.
 
 Ownership split, inherited from the original product and kept deliberately:
 the source system supplies metrics; the platform owns organization structure.
-A refresh overwrites numbers and never touches teams or assignments.
+A refresh overwrites numbers and never touches group assignments.
+
+Structure is one idea, not several. There used to be a `Team` table and a
+`Branch` table, which meant a customer who also wanted to compare regions, or
+product lines, or hiring cohorts, needed a third table and a release. A group
+type is a row now, so those are configuration.
 """
 from __future__ import annotations
 
@@ -26,6 +31,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -62,7 +68,13 @@ class Organization(Base, TimestampMixin):
     slug: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
-    branches: Mapped[list[Branch]] = relationship(back_populates="organization")
+    # `passive_deletes` hands the work to the database's own cascade. Without
+    # it SQLAlchemy tries to null `groups.org_id` first, which the NOT NULL
+    # constraint refuses -- so deleting a customer would fail on their
+    # structure rather than removing it.
+    groups: Mapped[list[Group]] = relationship(
+        back_populates="organization", passive_deletes=True
+    )
 
 
 class User(Base, TimestampMixin):
@@ -95,9 +107,11 @@ class Membership(Base, TimestampMixin):
     org_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     role: Mapped[Role] = mapped_column(Enum(Role, name="role"), nullable=False)
-    # Set for branch_manager / team_lead to scope what they may edit.
-    branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id", ondelete="SET NULL"))
-    team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id", ondelete="SET NULL"))
+    # Set for branch_manager / team_lead to scope what they may edit. One
+    # column rather than two, because "which part of the company" is one
+    # question: a branch manager's group is a branch, a team lead's is a team,
+    # and authority reaches everything beneath it either way.
+    group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id", ondelete="SET NULL"))
 
 
 class UserSession(Base):
@@ -133,31 +147,95 @@ class UserSession(Base):
 
 
 # ---------------------------------------------------------------- organization structure
-class Branch(Base, TimestampMixin):
-    __tablename__ = "branches"
-    __table_args__ = (UniqueConstraint("org_id", "name", name="uq_branch_org_name"),)
+class GroupType(Base, TimestampMixin):
+    """One axis a company is divided along: teams, branches, regions, cohorts.
+
+    Every organization ships with `team` and `branch`, because those are what
+    the boards this replaces are actually organized by. A customer may relabel
+    either, and add their own — a group type is a row, so "compare product
+    lines" is a form rather than a release.
+    """
+
+    __tablename__ = "group_types"
+    __table_args__ = (
+        UniqueConstraint("org_id", "key", name="uq_group_type_org_key"),
+        # At most one primary grouping per organization, enforced by the
+        # database rather than by whichever code path happens to set it.
+        Index(
+            "uq_group_type_org_primary",
+            "org_id",
+            unique=True,
+            postgresql_where=text("is_primary"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     org_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
-    name: Mapped[str] = mapped_column(String(200), nullable=False)
 
-    organization: Mapped[Organization] = relationship(back_populates="branches")
-    teams: Mapped[list[Team]] = relationship(back_populates="branch")
+    key: Mapped[str] = mapped_column(String(40), nullable=False)
+    label: Mapped[str] = mapped_column(String(80), nullable=False)
+    plural_label: Mapped[str] = mapped_column(String(80), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    # The grouping a board uses when a screen does not say otherwise.
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Shipped with the product: relabel yes, delete no. Roles name these two
+    # (`branch_manager`, `team_lead`), so removing them would leave a rank
+    # pointing at nothing.
+    is_builtin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    groups: Mapped[list[Group]] = relationship(back_populates="type", passive_deletes=True)
 
 
-class Team(Base, TimestampMixin):
-    __tablename__ = "teams"
-    __table_args__ = (UniqueConstraint("org_id", "name", name="uq_team_org_name"),)
+class Group(Base, TimestampMixin):
+    """One team, branch, region — whatever its type says it is.
+
+    `parent_id` is what makes a branch manager's authority mean something: a
+    team sits inside a branch, and permission reaches down the chain. It also
+    lets a person's branch be inferred from their team rather than stored
+    twice and allowed to disagree.
+    """
+
+    __tablename__ = "groups"
+    __table_args__ = (
+        UniqueConstraint("org_id", "type_id", "name", name="uq_group_org_type_name"),
+        Index("ix_groups_org_type", "org_id", "type_id"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     org_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
-    branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id", ondelete="SET NULL"))
+    type_id: Mapped[int] = mapped_column(ForeignKey("group_types.id", ondelete="CASCADE"))
+    parent_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id", ondelete="SET NULL"))
+
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     lead_name: Mapped[str] = mapped_column(String(200), default="", nullable=False)
     lead_role: Mapped[str] = mapped_column(String(80), default="Sales Manager", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
-    branch: Mapped[Branch | None] = relationship(back_populates="teams")
+    organization: Mapped[Organization] = relationship(back_populates="groups")
+    type: Mapped[GroupType] = relationship(back_populates="groups")
+
+
+class GroupMembership(Base, TimestampMixin):
+    """A person's place on one axis.
+
+    `type_id` is carried here as well as on the group so that "one team per
+    person, one branch per person" is a unique constraint instead of a rule
+    somebody has to remember. The two must agree, which `services.groups`
+    guarantees and `tests/test_groups_db.py` checks.
+    """
+
+    __tablename__ = "group_memberships"
+    __table_args__ = (
+        UniqueConstraint("org_id", "rep_id", "type_id", name="uq_group_membership_rep_type"),
+        Index("ix_group_memberships_org_group", "org_id", "group_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+    rep_id: Mapped[int] = mapped_column(ForeignKey("reps.id", ondelete="CASCADE"))
+    group_id: Mapped[int] = mapped_column(ForeignKey("groups.id", ondelete="CASCADE"))
+    type_id: Mapped[int] = mapped_column(ForeignKey("group_types.id", ondelete="CASCADE"))
 
 
 class Rep(Base, TimestampMixin):
@@ -181,9 +259,7 @@ class Rep(Base, TimestampMixin):
     title: Mapped[str] = mapped_column(String(200), default="", nullable=False)
     hire_date: Mapped[str] = mapped_column(String(40), default="", nullable=False)
 
-    # What we own. Survives every refresh.
-    team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id", ondelete="SET NULL"))
-
+    # What we own lives in `group_memberships` and survives every refresh.
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 
@@ -334,8 +410,8 @@ class Screen(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True)
     org_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
     name: Mapped[str] = mapped_column(String(200), nullable=False)
-    mode: Mapped[str] = mapped_column(String(40), nullable=False)  # whole_office | per_team | ...
-    team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"))
+    mode: Mapped[str] = mapped_column(String(40), nullable=False)  # whole_office | per_group | ...
+    group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id", ondelete="CASCADE"))
     config: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     theme_id: Mapped[int | None] = mapped_column(ForeignKey("themes.id", ondelete="SET NULL"))
 
@@ -352,8 +428,8 @@ class Theme(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     org_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
-    scope: Mapped[str] = mapped_column(String(20), nullable=False, default="org")  # org | team
-    team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"))
+    scope: Mapped[str] = mapped_column(String(20), nullable=False, default="org")  # org | group
+    group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id", ondelete="CASCADE"))
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     tokens: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 

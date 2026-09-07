@@ -210,7 +210,7 @@ h2 { font-size: 26px; font-weight: 600; letter-spacing: -.02em; margin-bottom: .
 }
 .boardwrap iframe { position: absolute; inset: 0; width: 1600px; height: 900px; border: 0; transform-origin: 0 0; }
 
-/* A team's crest, shown wherever the team is named. */
+/* A group's crest, shown wherever the group is named. */
 .crest { height: 26px; width: 26px; object-fit: contain; vertical-align: middle; margin-right: .55rem; flex: none; }
 .crest.blank { border-radius: 6px; display: inline-block; }
 .teamname { display: flex; align-items: center; }
@@ -393,7 +393,7 @@ async function render() {
 
       <div class="card"><div class="stats">
         ${[["Companies", stats.organizations], ["Active", stats.active_organizations],
-           ["Accounts", stats.users], ["Teams", stats.teams], ["Reps", stats.reps],
+           ["Accounts", stats.users], ["Groups", stats.groups], ["Reps", stats.reps],
            ["Displays", stats.displays], ["Screens", stats.screens], ["Sources", stats.sources]]
           .map(([k, v]) => `<div class="stat"><div class="k">${k}</div><div class="v">${num(v)}</div></div>`).join("")}
       </div></div>
@@ -410,12 +410,12 @@ async function render() {
 
       <div class="card"><table>
         <thead><tr>
-          <th class="l">Company</th><th>Teams</th><th>Reps</th><th>People</th>
+          <th class="l">Company</th><th>Groups</th><th>Reps</th><th>People</th>
           <th>Displays</th><th>Screens</th><th class="l">Status</th><th></th>
         </tr></thead>
         <tbody>${organizations.map(o => `<tr>
           <td class="l"><b>${esc(o.name)}</b> <code>${esc(o.slug)}</code></td>
-          <td>${num(o.counts.teams)}</td><td>${num(o.counts.reps)}</td>
+          <td>${num(o.counts.groups)}</td><td>${num(o.counts.reps)}</td>
           <td>${num(o.counts.people)}</td><td>${num(o.counts.displays)}</td>
           <td>${num(o.counts.screens)}</td>
           <td class="l">${o.is_active ? '<span class="pill on">active</span>' : '<span class="pill off">suspended</span>'}</td>
@@ -480,13 +480,13 @@ async function render() {
     }));
 
     on("[data-del]", node => dialog(`Delete ${node.dataset.slug}`,
-      `<div class="hint">This removes every team, person, screen, display and figure belonging to them. It cannot be undone.</div>
+      `<div class="hint">This removes every group, person, screen, display and figure belonging to them. It cannot be undone.</div>
        <div><label>Type <b>${esc(node.dataset.slug)}</b> to confirm</label><input id="d-slug" placeholder="${esc(node.dataset.slug)}"></div>`,
       async (close) => {
         const result = await api(`/platform/organizations/${node.dataset.del}/delete`, {
           method: "POST", body: JSON.stringify({ confirm_slug: $("d-slug").value.trim() }) });
         close();
-        toast(`Deleted ${result.deleted.name}: ${result.deleted.teams} teams, ${result.deleted.reps} reps.`, "good");
+        toast(`Deleted ${result.deleted.name}: ${result.deleted.groups} groups, ${result.deleted.reps} reps.`, "good");
         render();
       }, "Delete for good"));
   });

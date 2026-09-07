@@ -7,11 +7,11 @@ must never read as seniority inside an organization.
 """
 import pytest
 
-from scoreboard.models import Membership, Role, Team, User, UserSession
+from scoreboard.models import Group, Membership, Role, User, UserSession
 from scoreboard.services.auth import (
     AuthContext,
-    can_edit_team,
-    editable_team_ids,
+    can_edit_group,
+    editable_group_ids,
     has_role,
 )
 
@@ -52,9 +52,9 @@ def test_an_operator_has_no_organization():
     assert context.is_operator is True
 
 
-def test_an_operator_cannot_edit_a_team_by_default():
-    assert not can_edit_team(None, operator(), Team(id=1, org_id=1, name="Alpha"))
-    assert editable_team_ids(None, operator()) == []
+def test_an_operator_cannot_edit_a_group_by_default():
+    assert not can_edit_group(None, operator(), Group(id=1, org_id=1, type_id=1, name="Alpha"))
+    assert editable_group_ids(None, operator()) == []
 
 
 def test_an_owner_is_not_an_operator():

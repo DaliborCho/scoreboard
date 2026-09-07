@@ -210,7 +210,7 @@ h2 { font-size: 26px; font-weight: 600; letter-spacing: -.02em; margin-bottom: .
 }
 .boardwrap iframe { position: absolute; inset: 0; width: 1600px; height: 900px; border: 0; transform-origin: 0 0; }
 
-/* A team's crest, shown wherever the team is named. */
+/* A group's crest, shown wherever the group is named. */
 /* ---------------------------------------------------------------- home */
 /* Cards size to their content. Stretching every card to the tallest in its
    row left a chart with four bars sitting in half a screen of nothing. */
@@ -267,7 +267,7 @@ h2 { font-size: 26px; font-weight: 600; letter-spacing: -.02em; margin-bottom: .
 <div id="login" hidden>
   <div class="card stack">
     <h2>Scoreboard</h2>
-    <div class="hint">Sign in to manage teams, themes and screens.</div>
+    <div class="hint">Sign in to manage structure, themes and screens.</div>
     <div><label>Email</label><input id="li-email" type="email" autocomplete="username"></div>
     <div><label>Password</label><input id="li-pass" type="password" autocomplete="current-password"></div>
     <button class="primary" id="li-go" style="width:100%">Sign in</button>
@@ -305,7 +305,7 @@ const can = (minimum) => state.me && RANK[state.me.role] >= RANK[minimum];
 const TABS = [
   { key: "home",      label: "Home",      min: "viewer" },
   { key: "board",     label: "Board",     min: "viewer" },
-  { key: "teams",     label: "Teams",     min: "viewer" },
+  { key: "groups",    label: "Structure", min: "viewer" },
   { key: "people",    label: "People",    min: "viewer" },
   { key: "theme",     label: "Brand",     min: "team_lead" },
   { key: "screens",   label: "Screens",   min: "viewer" },
@@ -400,14 +400,15 @@ async function start() {
     `<div class="pill">${esc(state.me.role)}</div>`;
 
   const visible = TABS.filter(t => can(t.min));
-  //  is a detail page reached from the Teams list, not a destination of
-  // its own, so it never appears in the sidebar but must not be reset either.
-  if (state.tab !== "team" && !visible.some(t => t.key === state.tab)) {
+  // A single group's page is reached from the Structure list, not a
+  // destination of its own, so it never appears in the sidebar but must not
+  // be reset either.
+  if (state.tab !== "group" && !visible.some(t => t.key === state.tab)) {
     state.tab = visible[0].key;
   }
   $("nav").innerHTML = visible
     .map(t => `<button data-tab="${t.key}" class="${
-        t.key === state.tab || (state.tab === "team" && t.key === "teams") ? "on" : ""
+        t.key === state.tab || (state.tab === "group" && t.key === "groups") ? "on" : ""
       }">${t.label}</button>`)
     .join("");
   $("nav").querySelectorAll("button").forEach(b =>
@@ -487,7 +488,7 @@ const views = {};
 // some of these installations live.
 const ICONS = {
   board: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 5-7"/></svg>',
-  teams: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/></svg>',
+  groups: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/></svg>',
   people: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5"/><path d="M16 5.2a3.2 3.2 0 010 5.6M18 14.9c2 .7 3.5 2.5 3.5 5.1"/></svg>',
   theme: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 000 18c1.4 0 2-1 2-2 0-1.6 1-2 2.5-2H18a3 3 0 003-3c0-4.5-4-8-9-8z"/><circle cx="7.5" cy="11" r="1.1" fill="currentColor" stroke="none"/><circle cx="11" cy="7.5" r="1.1" fill="currentColor" stroke="none"/><circle cx="15.5" cy="9" r="1.1" fill="currentColor" stroke="none"/></svg>',
   screens: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>',
@@ -499,7 +500,7 @@ const ICONS = {
 
 
 // Charts drawn as inline SVG. The same numbers the television gets, from the
-// same builder, so a team page can never quietly disagree with the wall.
+// same builder, so a group page can never quietly disagree with the wall.
 function chartBar(widget, colour, colours) {
   const series = widget.series || [];
   if (!series.length) return `<div class="hint">Nothing to show yet.</div>`;
@@ -549,10 +550,10 @@ function sparkline(points, colour) {
   </svg>`;
 }
 
-views.team = async () => {
-  const id = state.teamId;
-  const [data, { themes }] = await Promise.all([api(`/teams/${id}/stats`), api("/themes")]);
-  const tokens = themes.find(t => t.scope === "team" && t.team_id === Number(id))?.tokens || {};
+views.group = async () => {
+  const id = state.groupId;
+  const [data, { themes }] = await Promise.all([api(`/groups/${id}/stats`), api("/themes")]);
+  const tokens = themes.find(t => t.scope === "group" && t.group_id === Number(id))?.tokens || {};
   const colour = tokens.primary || "#0071e3";
   const palette = [colour, "#f59e0b", "#22c55e", "#a855f7", "#06b6d4", "#ef4444", "#84cc16", "#8b8d93"];
 
@@ -571,22 +572,22 @@ views.team = async () => {
   const donut = data.widgets.find(w => w.type === "donut");
 
   section(
-    data.team.name,
+    data.group.name,
     `${data.member_count} ${data.member_count === 1 ? "person" : "people"} &middot; ${data.period.start} to ${data.period.end}`,
     `<div class="hero-card">
        <div style="display:flex;align-items:center;gap:.9rem">
          ${crest}
          <div>
-           <div class="big" style="font-size:24px">${esc(data.team.name)}</div>
-           <div class="hint" style="margin:0">${data.team.lead_name
-             ? esc(data.team.lead_name) + " &middot; " + esc(data.team.lead_role)
-             : "No team lead set"}</div>
+           <div class="big" style="font-size:24px">${esc(data.group.name)}</div>
+           <div class="hint" style="margin:0">${data.group.lead_name
+             ? esc(data.group.lead_name) + " &middot; " + esc(data.group.lead_role)
+             : "No lead set"}</div>
          </div>
        </div>
        <div class="tvlist">
-         <button class="sm" id="t-back">All teams</button>
+         <button class="sm" id="t-back">Back to structure</button>
          <button class="sm" id="t-theme">Edit theme</button>
-         <a href="/preview/live?mode=per_team&team=${encodeURIComponent(data.team.name)}&title=${encodeURIComponent(data.team.name.toUpperCase())}" target="_blank">
+         <a href="/preview/live?mode=per_group&group_by=${encodeURIComponent(data.group.type)}&group=${encodeURIComponent(data.group.name)}&title=${encodeURIComponent(data.group.name.toUpperCase())}" target="_blank">
            <button class="sm primary">Open board</button></a>
        </div>
      </div>
@@ -602,14 +603,14 @@ views.team = async () => {
        <div class="card"><h3>Net split, day by day</h3>${sparkline(data.trend, colour)}</div>
      </div>
 
-     <div class="card"><h3>The team</h3><table>
+     <div class="card"><h3>The people</h3><table>
        <thead><tr><th>#</th><th class="l">Rep</th><th>Issued</th><th>Sold</th><th>Close</th><th>Gross</th><th>Net</th><th>DPL</th></tr></thead>
        <tbody>${data.reps.map(r => `<tr>
          <td>${r.rank}</td><td class="l"><b>${esc(r.rep_name)}</b></td>
          <td>${fmt(r.issued_leads, "number")}</td><td>${fmt(r.sold_leads, "number")}</td>
          <td>${fmt(r.close_rate, "percent")}</td><td>${fmt(r.gross_split, "currency")}</td>
          <td>${fmt(r.net_split, "currency")}</td><td>${fmt(r.dpl, "currency")}</td>
-       </tr>`).join("") || `<tr><td class="l" colspan="8">Nobody is assigned to this team yet.</td></tr>`}</tbody>
+       </tr>`).join("") || `<tr><td class="l" colspan="8">Nobody is in this group yet.</td></tr>`}</tbody>
        <tfoot><tr><td></td><td class="l">Total</td>
          <td>${fmt(data.totals.issued_leads, "number")}</td><td>${fmt(data.totals.sold_leads, "number")}</td>
          <td>${fmt(data.totals.close_rate, "percent")}</td><td>${fmt(data.totals.gross_split, "currency")}</td>
@@ -618,8 +619,8 @@ views.team = async () => {
      </table></div>`
   );
 
-  $("t-back").onclick = () => { state.tab = "teams"; start(); };
-  $("t-theme").onclick = () => { state.themeTarget = "team:" + id; state.tab = "theme"; start(); };
+  $("t-back").onclick = () => { state.tab = "groups"; start(); };
+  $("t-theme").onclick = () => { state.themeTarget = "group:" + id; state.tab = "theme"; start(); };
 };
 
 views.home = async () => {
@@ -632,9 +633,9 @@ views.home = async () => {
 
   const tiles = [
     ["board", "Live board", "Current standings, exactly as ranked", `<b>${data.rep_count}</b> reps`, "viewer"],
-    ["teams", "Teams", "Structure, leads, and each team's own look", `<b>${data.standings.length}</b> teams`, "viewer"],
-    ["people", "People", "Who sits on which team", `<b>${data.rep_count}</b> on the board`, "viewer"],
-    ["theme", "Brand", "Colours, artwork and fonts", "organization &amp; teams", "team_lead"],
+    ["groups", "Structure", "Teams, branches, and any grouping you add", `<b>${data.standings.length}</b> groups`, "viewer"],
+    ["people", "People", "Who sits in which group", `<b>${data.rep_count}</b> on the board`, "viewer"],
+    ["theme", "Brand", "Colours, artwork and fonts", "organization &amp; groups", "team_lead"],
     ["screens", "Screens", "What a television shows, and its charts", `<b>${screens.length}</b> screens`, "viewer"],
     ["displays", "Displays", "Televisions and their links", `<b>${displays.filter(d => !d.revoked).length}</b> active`, "branch_manager"],
     ["access", "Access", "Who can sign in, and as what", "accounts and roles", "org_admin"],
@@ -647,10 +648,10 @@ views.home = async () => {
   const donuts = data.widgets.filter(w => w.type === "donut");
   const leaders = data.widgets.find(w => w.type === "leaders");
 
-  // Charts are coloured by the team they describe, so a slice and the crest
-  // beside its name are recognisably the same team.
+  // Charts are coloured by the group they describe, so a slice and the crest
+  // beside its name are recognisably the same group.
   const teamColour = (label) =>
-    data.standings.find(t => t.team === label)?.colour || "#8b8d93";
+    data.standings.find(t => t.group === label)?.colour || "#8b8d93";
   const byTeam = (widget) => (widget.series || []).map(s => teamColour(s.label));
 
   const kpi = (key) => `<div class="stat">
@@ -667,7 +668,7 @@ views.home = async () => {
        <div>
          <div class="hint" style="margin:0 0 .2rem">Net split this period</div>
          <div class="big">${money(data.totals.net_split)}</div>
-         <div class="hint" style="margin:.2rem 0 0">${data.rep_count} reps &middot; ${data.standings.length} teams</div>
+         <div class="hint" style="margin:.2rem 0 0">${data.rep_count} reps &middot; ${data.standings.length} groups</div>
        </div>
        <div>
          <div class="hint" style="margin:0 0 .4rem">Open a board</div>
@@ -684,7 +685,7 @@ views.home = async () => {
          .map(kpi).join("")}
      </div></div>
 
-     <h3 style="margin:1.6rem 0 .8rem;font-size:19px;font-weight:600;letter-spacing:-.01em">How the teams compare</h3>
+     <h3 style="margin:1.6rem 0 .8rem;font-size:19px;font-weight:600;letter-spacing:-.01em">How the groups compare</h3>
      <div class="grid2">
        ${bars.map(w => `<div class="card"><h3>${esc(w.label)}</h3>${chartBar(w, null, byTeam(w))}</div>`).join("")}
        ${donuts.map(w => `<div class="card"><h3>${esc(w.label)}</h3>${chartDonut(w, byTeam(w))}</div>`).join("")}
@@ -693,20 +694,20 @@ views.home = async () => {
      </div>
 
      <div class="card"><h3>Standings</h3><table>
-       <thead><tr><th>#</th><th class="l">Team</th><th class="l">MVP</th><th>People</th>
+       <thead><tr><th>#</th><th class="l">Group</th><th class="l">MVP</th><th>People</th>
          <th>Issued</th><th>Sold</th><th>Close</th><th>Gross</th><th>Net</th><th>DPL</th></tr></thead>
        <tbody>${data.standings.map(t => `<tr>
          <td>${t.rank}</td>
-         <td class="l"><button class="ghost" data-open="${t.team_id ?? ""}" style="padding:.2rem .3rem">
+         <td class="l"><button class="ghost" data-open="${t.group_id ?? ""}" style="padding:.2rem .3rem">
            <span class="teamname">${t.badge_url
              ? `<img class="crest" src="${esc(t.badge_url)}" alt="">`
-             : `<span class="crest blank" style="background:${t.colour}"></span>`}<b>${esc(t.team)}</b></span></button></td>
+             : `<span class="crest blank" style="background:${t.colour}"></span>`}<b>${esc(t.group)}</b></span></button></td>
          <td class="l">${esc(t.mvp) || "&mdash;"}</td>
          <td>${t.rep_count}</td>
          <td>${fmt(t.issued_leads, "number")}</td><td>${fmt(t.sold_leads, "number")}</td>
          <td>${fmt(t.close_rate, "percent")}</td><td>${fmt(t.gross_split, "currency")}</td>
          <td>${fmt(t.net_split, "currency")}</td><td>${fmt(t.dpl, "currency")}</td>
-       </tr>`).join("") || `<tr><td class="l" colspan="10">No teams yet.</td></tr>`}</tbody>
+       </tr>`).join("") || `<tr><td class="l" colspan="10">No groups yet.</td></tr>`}</tbody>
      </table></div>
 
      <h3 style="margin:1.6rem 0 .8rem;font-size:19px;font-weight:600;letter-spacing:-.01em">Set things up</h3>
@@ -724,57 +725,98 @@ views.home = async () => {
   onClick("[data-go]", node => { state.tab = node.dataset.go; start(); });
   onClick("[data-open]", node => {
     if (!node.dataset.open) return;
-    state.teamId = node.dataset.open;
-    state.tab = "team";
+    state.groupId = node.dataset.open;
+    state.tab = "group";
     start();
   });
 };
 
 views.board = async () => {
   const data = await api("/board?mode=whole_office&rank_by=net_split");
-  const columns = ["rank", "rep_name", "team", "issued_leads", "sold_leads", "close_rate", "gross_split", "net_split", "dpl"];
-  const labels = { rank: "#", rep_name: "Rep", team: "Team", issued_leads: "Issued", sold_leads: "Sold",
+  const columns = ["rank", "rep_name", "group", "issued_leads", "sold_leads", "close_rate", "gross_split", "net_split", "dpl"];
+  const labels = { rank: "#", rep_name: "Rep", group: "Group", issued_leads: "Issued", sold_leads: "Sold",
                    close_rate: "Close", gross_split: "Gross", net_split: "Net", dpl: "DPL" };
   const kinds = { close_rate: "percent", gross_split: "currency", net_split: "currency", dpl: "currency" };
   const cell = (rep, col) => col === "rank" ? rep.rank
-    : (col === "rep_name" || col === "team") ? esc(rep[col]) : fmt(rep[col], kinds[col] || "number");
+    : (col === "rep_name" || col === "group") ? esc(rep[col]) : fmt(rep[col], kinds[col] || "number");
 
   section("Live board", `${data.rep_count} reps &middot; ${data.period.start} to ${data.period.end}`, `
     <div class="card"><table>
-      <thead><tr>${columns.map(c => `<th class="${c === "rep_name" || c === "team" ? "l" : ""}">${labels[c]}</th>`).join("")}</tr></thead>
+      <thead><tr>${columns.map(c => `<th class="${c === "rep_name" || c === "group" ? "l" : ""}">${labels[c]}</th>`).join("")}</tr></thead>
       <tbody>${data.reps.map(r => `<tr>${columns.map(c =>
-        `<td class="${c === "rep_name" || c === "team" ? "l" : ""}">${cell(r, c)}</td>`).join("")}</tr>`).join("")}</tbody>
+        `<td class="${c === "rep_name" || c === "group" ? "l" : ""}">${cell(r, c)}</td>`).join("")}</tr>`).join("")}</tbody>
       <tfoot><tr><td></td><td class="l"><b>TOTAL</b></td><td></td>${columns.slice(3).map(c =>
         `<td><b>${fmt(data.total[c], kinds[c] || "number")}</b></td>`).join("")}</tr></tfoot>
     </table></div>`);
 };
 
-views.teams = async () => {
-  const [{ teams }, { reps }, { themes }] = await Promise.all([
-    api("/teams"), api("/reps"), api("/themes")]);
-  state.cache.teams = teams;
-  // Count who is *shown* on the team, not only who was moved there by hand.
-  // Most people arrive on a team through the source and are never reassigned;
-  // reporting them as zero members beside a board that plainly shows them is
-  // the console contradicting itself.
-  const count = (team) => reps.filter(r => r.team === team.name).length;
-  const assigned = (team) => reps.filter(r => r.team_id === team.id).length;
-  const editable = state.me.editable_team_ids;
+views.groups = async () => {
+  const [{ group_types }, { groups }, { reps }, { themes }] = await Promise.all([
+    api("/group-types"), api("/groups"), api("/reps"), api("/themes")]);
+
+  // Which axis is being looked at. Kept in state so coming back from a group
+  // page lands where you left rather than snapping back to teams.
+  const axis = group_types.find(t => t.key === state.axis) || group_types[0];
+  if (!axis) return section("Structure", "This organization has no groupings yet.", "");
+  state.axis = axis.key;
+
+  const mine = groups.filter(g => g.type_id === axis.id);
+  const parents = group_types.filter(t => t.id !== axis.id);
+  const parentGroups = groups.filter(g => g.type_id !== axis.id);
+  state.cache.groups = groups;
+
+  // Count who is *shown* in the group, not only who was moved there by hand.
+  // Most people arrive through the source and are never reassigned; reporting
+  // them as zero members beside a board that plainly shows them is the console
+  // contradicting itself.
+  const shown = (g) => reps.filter(r => (r.groups[axis.key] || {}).name === g.name).length;
+  const moved = (g) => reps.filter(r => (r.groups[axis.key] || {}).group_id === g.id).length;
+  const editable = state.me.editable_group_ids;
   const mayEdit = (id) => editable === null || (editable || []).includes(id);
 
-  section("Teams", "The platform owns team structure. A source refresh never changes it.", `
-    ${can("branch_manager") ? `<div class="card"><h3>New team</h3><div class="row">
+  const nameOf = (id) => groups.find(g => g.id === id)?.name || "";
+
+  const tabs = group_types.map(t =>
+    `<button class="sm ${t.id === axis.id ? "primary" : ""}" data-axis="${esc(t.key)}">
+       ${esc(t.plural_label)}${t.is_primary ? ' <span class="pill on">boards</span>' : ""}
+     </button>`).join("");
+
+  section("Structure",
+    "How this company is divided. The platform owns it &mdash; a source refresh never changes it. " +
+    "Teams and branches ship with the product; add a grouping of your own and every board, chart and " +
+    "theme can use it straight away.",
+    `<div class="card"><div class="tvlist">${tabs}
+       ${can("org_admin") ? `<button class="sm" id="gt-add">+ New grouping</button>` : ""}
+       ${can("org_admin") && !axis.is_primary
+          ? `<button class="sm" id="gt-primary">Group boards by ${esc(axis.plural_label.toLowerCase())}</button>` : ""}
+       ${can("org_admin") ? `<button class="sm" id="gt-rename">Rename</button>` : ""}
+       ${can("org_admin") && !axis.is_builtin ? `<button class="sm danger" id="gt-del">Remove grouping</button>` : ""}
+     </div>
+     <div class="hint" style="margin:.6rem 0 0">
+       ${axis.is_primary
+         ? `Boards group by ${esc(axis.plural_label.toLowerCase())} unless a screen says otherwise.`
+         : `A screen can be set to group by ${esc(axis.plural_label.toLowerCase())}.`}
+       ${axis.is_builtin ? " Ships with the product: it can be renamed, not removed." : ""}
+     </div></div>
+
+    ${can("branch_manager") ? `<div class="card"><h3>New ${esc(axis.label.toLowerCase())}</h3><div class="row">
       <div><label>Name</label><input id="t-name"></div>
       <div><label>Lead</label><input id="t-lead"></div>
       <div><label>Role</label><select id="t-role">
         <option>Sales Manager</option><option>SMIT</option><option>General Manager</option><option>Other</option>
       </select></div>
+      ${parents.length ? `<div><label>Inside</label><select id="t-parent">
+        <option value="">&mdash; nothing &mdash;</option>
+        ${parentGroups.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join("")}
+      </select></div>` : ""}
       <div class="fixed"><button class="primary" id="t-add">Create</button></div>
     </div></div>` : ""}
+
     <div class="card"><table>
-      <thead><tr><th class="l">Team</th><th class="l">Lead</th><th>Members</th><th></th></tr></thead>
-      <tbody>${teams.map(t => {
-        const art = themes.find(x => x.scope === "team" && x.team_id === t.id)?.tokens || {};
+      <thead><tr><th class="l">${esc(axis.label)}</th><th class="l">Lead</th>
+        <th class="l">Inside</th><th>People</th><th></th></tr></thead>
+      <tbody>${mine.map(t => {
+        const art = themes.find(x => x.scope === "group" && x.group_id === t.id)?.tokens || {};
         const crest = art.badge_url
           ? `<img class="crest" src="${esc(art.badge_url)}" alt="">`
           : `<span class="crest blank" style="background:${esc(art.primary || "#d8d8dd")}"></span>`;
@@ -783,119 +825,218 @@ views.teams = async () => {
             <span class="teamname">${crest}<b>${esc(t.name)}</b></span></button></td>
           <td class="l">${esc(t.lead_name) || '<span class="pill">none</span>'}
               ${t.lead_name ? `<span class="pill">${esc(t.lead_role)}</span>` : ""}</td>
-          <td>${count(t)}${assigned(t) && assigned(t) !== count(t)
-            ? ` <span class="pill">${assigned(t)} moved here</span>` : ""}</td>
+          <td class="l">${t.parent_id ? esc(nameOf(t.parent_id)) : "&mdash;"}</td>
+          <td>${shown(t)}${moved(t) && moved(t) !== shown(t)
+            ? ` <span class="pill">${moved(t)} moved here</span>` : ""}</td>
           <td>${mayEdit(t.id) ? `<button class="sm" data-theme="${t.id}">Theme</button>
                                  <button class="sm" data-edit="${t.id}">Edit</button>` : ""}
               ${can("org_admin") ? `<button class="sm danger" data-del="${t.id}">Delete</button>` : ""}</td>
         </tr>`;
-      }).join("")}</tbody>
+      }).join("") || `<tr><td class="l" colspan="5">No ${esc(axis.plural_label.toLowerCase())} yet.</td></tr>`}</tbody>
     </table></div>`);
 
-  // A team's look belongs beside the team, not in a separate menu where you
+  onClick("[data-axis]", node => { state.axis = node.dataset.axis; render(); });
+
+  // A group's look belongs beside the group, not in a separate menu where you
   // first have to remember which of five dropdowns picks the one you meant.
   onClick("[data-open]", node => {
-    state.teamId = node.dataset.open;
-    state.tab = "team";
+    state.groupId = node.dataset.open;
+    state.tab = "group";
     start();
   });
 
   onClick("[data-theme]", node => {
-    state.themeTarget = "team:" + node.dataset.theme;
+    state.themeTarget = "group:" + node.dataset.theme;
     state.tab = "theme";
     start();
   });
 
+  if (can("org_admin")) {
+    $("gt-add").onclick = () => dialog("New grouping", `
+      <div class="hint">A way of dividing the company &mdash; regions, product lines, hiring cohorts.
+        Boards, charts and themes can all use it as soon as it exists.</div>
+      <div><label>Name of one</label><input id="gt-label" placeholder="Region"></div>
+      <div><label>Name of many</label><input id="gt-plural" placeholder="Regions"></div>`,
+      async (close) => {
+        const label = $("gt-label").value.trim();
+        if (!label) throw new Error("A grouping needs a name.");
+        const made = await api("/group-types", { method: "POST", body: JSON.stringify({
+          label, plural_label: $("gt-plural").value.trim() }) });
+        state.axis = made.key;
+        close(); toast("Grouping added", "good"); render();
+      });
+
+    $("gt-rename").onclick = () => dialog(`Rename ${axis.plural_label}`, `
+      <div><label>Name of one</label><input id="gt-label" value="${esc(axis.label)}"></div>
+      <div><label>Name of many</label><input id="gt-plural" value="${esc(axis.plural_label)}"></div>`,
+      async (close) => {
+        await api(`/group-types/${axis.id}`, { method: "PATCH", body: JSON.stringify({
+          label: $("gt-label").value.trim(), plural_label: $("gt-plural").value.trim() }) });
+        close(); toast("Saved", "good"); render();
+      });
+
+    if (!axis.is_primary) $("gt-primary").onclick = () => guard(async () => {
+      await api(`/group-types/${axis.id}/primary`, { method: "POST" });
+      toast(`Boards now group by ${axis.plural_label.toLowerCase()}`, "good"); render();
+    });
+
+    if (!axis.is_builtin) $("gt-del").onclick = () => dialog(`Remove ${axis.plural_label}`,
+      `<div class="hint">This removes the grouping and every ${esc(axis.label.toLowerCase())} in it.
+        Nobody is deleted &mdash; people simply stop being grouped this way.</div>`,
+      async (close) => {
+        await api(`/group-types/${axis.id}/delete`, { method: "POST" });
+        state.axis = null;
+        close(); toast("Grouping removed", "good"); render();
+      }, "Remove");
+  }
+
   if (can("branch_manager")) $("t-add").onclick = () => guard(async () => {
-    await api("/teams", { method: "POST", body: JSON.stringify({
-      name: $("t-name").value.trim(), lead_name: $("t-lead").value.trim(), lead_role: $("t-role").value }) });
-    toast("Team created", "good"); render();
+    const parent = $("t-parent");
+    await api("/groups", { method: "POST", body: JSON.stringify({
+      type_id: axis.id,
+      name: $("t-name").value.trim(),
+      lead_name: $("t-lead").value.trim(),
+      lead_role: $("t-role").value,
+      parent_id: parent && parent.value ? Number(parent.value) : null }) });
+    toast(`${axis.label} created`, "good"); render();
   });
 
   const ROLES = ["Sales Manager", "SMIT", "General Manager", "Other"];
 
   onClick("[data-edit]", node => {
-    const team = teams.find(t => t.id === Number(node.dataset.edit));
-    dialog(`Edit ${team.name}`, `
-      <div><label>Team name</label><input id="e-name" value="${esc(team.name)}"></div>
-      <div><label>Team lead</label><input id="e-lead" value="${esc(team.lead_name)}"></div>
+    const group = mine.find(t => t.id === Number(node.dataset.edit));
+    dialog(`Edit ${group.name}`, `
+      <div><label>Name</label><input id="e-name" value="${esc(group.name)}"></div>
+      <div><label>Lead</label><input id="e-lead" value="${esc(group.lead_name)}"></div>
       <div><label>Lead role</label><select id="e-role">${ROLES.map(r =>
-        `<option ${r === team.lead_role ? "selected" : ""}>${r}</option>`).join("")}</select></div>`,
+        `<option ${r === group.lead_role ? "selected" : ""}>${r}</option>`).join("")}</select></div>
+      ${can("org_admin") && parentGroups.length ? `<div><label>Inside</label><select id="e-parent">
+        <option value="">&mdash; nothing &mdash;</option>
+        ${parentGroups.map(g => `<option value="${g.id}" ${g.id === group.parent_id ? "selected" : ""}>${esc(g.name)}</option>`).join("")}
+      </select></div>` : ""}`,
       async (close) => {
         const name = $("e-name").value.trim();
-        if (!name) throw new Error("A team needs a name.");
-        await api(`/teams/${team.id}`, { method: "PATCH", body: JSON.stringify({
-          name, lead_name: $("e-lead").value.trim(),
-          lead_role: $("e-role").value, branch_id: team.branch_id }) });
+        if (!name) throw new Error("A group needs a name.");
+        const parent = $("e-parent");
+        await api(`/groups/${group.id}`, { method: "PATCH", body: JSON.stringify({
+          type_id: axis.id, name, lead_name: $("e-lead").value.trim(),
+          lead_role: $("e-role").value,
+          parent_id: parent ? (parent.value ? Number(parent.value) : null) : group.parent_id }) });
         close(); toast("Saved", "good"); render();
       });
   });
 
   onClick("[data-del]", node => {
     const id = Number(node.dataset.del);
-    const team = teams.find(t => t.id === id);
-    const members = reps.filter(r => r.team_id === id);
-    const options = teams.filter(t => t.id !== id);
+    const group = mine.find(t => t.id === id);
+    // Only people moved here by hand have a membership to redirect. Anyone
+    // showing here through the source keeps showing wherever the source says.
+    const members = reps.filter(r => (r.groups[axis.key] || {}).group_id === id
+                                     && !(r.groups[axis.key] || {}).inherited);
+    const options = mine.filter(t => t.id !== id);
 
-    dialog(`Delete ${team.name}`, members.length
-      ? `<div class="hint">Every member needs somewhere to go. Deleting a team never deletes people.</div>
+    dialog(`Delete ${group.name}`, members.length
+      ? `<div class="hint">Every member needs somewhere to go. Deleting a group never deletes people.</div>
          ${members.map(m => `<div class="moverow">
            <span>${esc(m.name)}</span>
            <select data-move="${m.id}">
-             <option value="">— Unassigned —</option>
+             <option value="">&mdash; Unassigned &mdash;</option>
              ${options.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join("")}
            </select></div>`).join("")}`
-      : `<div class="hint">This team has no members. It can be removed straight away.</div>`,
+      : `<div class="hint">Nobody was moved into this group by hand. It can be removed straight away.</div>`,
       async (close) => {
         const reassign = {};
         $("modal").querySelectorAll("[data-move]").forEach(select => {
           reassign[Number(select.dataset.move)] = select.value ? Number(select.value) : null;
         });
-        await api(`/teams/${id}/delete`, { method: "POST", body: JSON.stringify({ reassign }) });
-        close(); toast("Team deleted", "good"); render();
-      }, "Delete team");
+        await api(`/groups/${id}/delete`, { method: "POST", body: JSON.stringify({ reassign }) });
+        close(); toast("Deleted", "good"); render();
+      }, "Delete");
   });
 };
 
 views.people = async () => {
-  const [{ reps }, { teams }] = await Promise.all([api("/reps"), api("/teams")]);
-  section("People", "A local assignment outranks whatever the source reports, and survives every refresh.", `
+  const [{ reps, group_types, primary_type }, { groups }] = await Promise.all([
+    api("/reps"), api("/groups")]);
+
+  // People are placed on one axis at a time. Showing five dropdowns per row
+  // turns a table into a form; showing one, with a chooser above it, keeps the
+  // page readable and the action obvious.
+  const axis = group_types.find(t => t.key === state.peopleAxis)
+            || group_types.find(t => t.key === primary_type)
+            || group_types[0];
+  if (!axis) return section("People", "This organization has no groupings yet.", "");
+  state.peopleAxis = axis.key;
+  const options = groups.filter(g => g.type_id === axis.id);
+
+  const tabs = group_types.map(t =>
+    `<button class="sm ${t.id === axis.id ? "primary" : ""}" data-paxis="${esc(t.key)}">
+       ${esc(t.plural_label)}</button>`).join("");
+
+  const placed = (r) => r.groups[axis.key] || null;
+
+  section("People",
+    "A local assignment outranks whatever the source reports, and survives every refresh.",
+    `<div class="card"><div class="tvlist">${tabs}</div>
+       <div class="hint" style="margin:.6rem 0 0">Placing somebody by ${esc(axis.label.toLowerCase())}.
+         A group inside another passes down: put someone on a team and their branch follows.</div></div>
     <div class="card"><table>
-      <thead><tr><th class="l">Name</th><th class="l">Showing as</th><th class="l">Source says</th><th class="l">Title</th><th></th></tr></thead>
-      <tbody>${reps.map(r => `<tr>
+      <thead><tr><th class="l">Name</th><th class="l">${esc(axis.label)}</th>
+        <th class="l">Source says</th><th class="l">Title</th><th></th></tr></thead>
+      <tbody>${reps.map(r => {
+        const here = placed(r);
+        return `<tr>
         <td class="l"><b>${esc(r.name)}</b></td>
-        <td class="l">${esc(r.team)} ${r.assigned_locally ? '<span class="pill on">local</span>' : '<span class="pill">from source</span>'}</td>
+        <td class="l">${here ? esc(here.name) : "&mdash;"} ${
+          !here ? ""
+            : here.source ? '<span class="pill">from source</span>'
+            : here.inherited ? '<span class="pill">inherited</span>'
+            : '<span class="pill on">local</span>'}</td>
         <td class="l">${esc(r.source_team) || "&mdash;"}</td>
         <td class="l">${esc(r.title) || "&mdash;"}</td>
         <td>${can("branch_manager") ? `<select data-assign="${r.id}" style="width:auto">
-          <option value="">— use source —</option>
-          ${teams.map(t => `<option value="${t.id}" ${t.id === r.team_id ? "selected" : ""}>${esc(t.name)}</option>`).join("")}
+          <option value="">&mdash; use source &mdash;</option>
+          ${options.map(t => `<option value="${t.id}" ${
+            here && !here.inherited && !here.source && t.id === here.group_id ? "selected" : ""
+          }>${esc(t.name)}</option>`).join("")}
         </select>` : ""}</td>
-      </tr>`).join("")}</tbody>
+      </tr>`; }).join("")}</tbody>
     </table></div>`);
+
+  onClick("[data-paxis]", node => { state.peopleAxis = node.dataset.paxis; render(); });
 
   $("view").querySelectorAll("[data-assign]").forEach(select => {
     select.onchange = () => guard(async () => {
-      await api(`/reps/${select.dataset.assign}/team`, { method: "POST",
-        body: JSON.stringify({ team_id: select.value ? Number(select.value) : null }) });
+      await api(`/reps/${select.dataset.assign}/group`, { method: "POST",
+        body: JSON.stringify({
+          type_id: axis.id,
+          group_id: select.value ? Number(select.value) : null }) });
       toast("Assignment saved", "good"); render();
     });
   });
 };
 
 views.theme = async () => {
-  const [catalogue, { themes }, { teams }] = await Promise.all([
-    api("/themes/catalogue"), api("/themes"), api("/teams")]);
-  const editable = state.me.editable_team_ids;
+  const [catalogue, { themes }, { groups, group_types }] = await Promise.all([
+    api("/themes/catalogue"), api("/themes"), api("/groups")]);
+  const editable = state.me.editable_group_ids;
+  const kindOf = (id) => group_types.find(t => t.id === id);
   const targets = [
     ...(can("org_admin") ? [{ value: "org", label: "Whole organization" }] : []),
-    ...teams.filter(t => editable === null || (editable || []).includes(t.id))
-            .map(t => ({ value: "team:" + t.id, label: t.name })),
+    ...groups.filter(g => editable === null || (editable || []).includes(g.id))
+             .map(g => ({
+               value: "group:" + g.id,
+               // Prefixed with its grouping, because two axes may hold the
+               // same name and a bare "North" in a dropdown says nothing.
+               label: `${kindOf(g.type_id)?.label || "Group"} \u00b7 ${g.name}`,
+               name: g.name,
+               axis: kindOf(g.type_id)?.key || "",
+             })),
   ];
-  if (!targets.length) return section("Theme", "You have no team to style.", "");
+  if (!targets.length) return section("Theme", "You have no group to style.", "");
 
   const tokens = { ...catalogue.defaults };
-  section("Brand", "Colours, artwork and a font &mdash; never CSS. A theme that would be unreadable on a screen is refused, not saved with a warning. Each team can carry its own; anything it does not set is inherited from the organization.", `
+  section("Brand", "Colours, artwork and a font &mdash; never CSS. A theme that would be unreadable on a screen is refused, not saved with a warning. Each group can carry its own; anything it does not set is inherited from the organization.", `
     <div class="card">
       <div class="row">
         <div><label>Applies to</label><select id="th-target">${targets.map(t =>
@@ -916,7 +1057,7 @@ views.theme = async () => {
       <h3 style="margin-top:1.2rem">Artwork</h3>
       <div class="artgrid">
         ${[["hero_url", "Hero banner", "the big crest across the top"],
-           ["badge_url", "Team badge", "the small mark beside each rep"],
+           ["badge_url", "Group badge", "the small mark beside each rep"],
            ["logo_url", "Header logo", "a modest mark, if no hero"],
            ["background_image_url", "Background", "texture behind the board"]]
           .map(([token, label, note]) => `<div class="artslot">
@@ -973,10 +1114,11 @@ views.theme = async () => {
   // which is what the contrast panel above is for.
   function drawBoard() {
     const target = $("th-target").value;
-    const team = target === "org"
-      ? "" : (teams.find(t => t.id === Number(target.split(":")[1]))?.name || "");
-    const query = team
-      ? `?mode=per_team&team=${encodeURIComponent(team)}&title=${encodeURIComponent(team.toUpperCase())}`
+    const chosen = targets.find(t => t.value === target);
+    const query = chosen && chosen.name
+      ? `?mode=per_group&group_by=${encodeURIComponent(chosen.axis)}` +
+        `&group=${encodeURIComponent(chosen.name)}` +
+        `&title=${encodeURIComponent(chosen.name.toUpperCase())}`
       : "?mode=whole_office";
     const wrap = $("th-board");
     wrap.innerHTML = `<iframe src="/preview/live${query}" title="Board preview"></iframe>`;
@@ -1005,7 +1147,7 @@ views.theme = async () => {
     const target = $("th-target").value;
     const found = target === "org"
       ? themes.find(t => t.scope === "org")
-      : themes.find(t => t.scope === "team" && t.team_id === Number(target.split(":")[1]));
+      : themes.find(t => t.scope === "group" && t.group_id === Number(target.split(":")[1]));
     const merged = { ...catalogue.defaults, ...(found?.tokens || {}) };
     $("th-name").value = found?.name || "Brand";
     $("th-font").value = merged.font || "inter";
@@ -1015,7 +1157,7 @@ views.theme = async () => {
     });
     refresh(); drawArtwork(); drawBoard();
   };
-  // Arriving from a team's Theme button preselects that team, so the editor
+  // Arriving from a group's Theme button preselects that group, so the editor
   // opens on the thing that was clicked.
   if (state.themeTarget && targets.some(t => t.value === state.themeTarget)) {
     $("th-target").value = state.themeTarget;
@@ -1046,7 +1188,7 @@ views.theme = async () => {
 
   $("th-save").onclick = () => guard(async () => {
     const target = $("th-target").value;
-    const path = target === "org" ? "/themes/org" : `/themes/team/${target.split(":")[1]}`;
+    const path = target === "org" ? "/themes/org" : `/themes/group/${target.split(":")[1]}`;
     await api(path, { method: "PUT", body: JSON.stringify({ name: $("th-name").value, tokens: readTokens() }) });
     toast("Theme saved", "good");
     drawBoard();
@@ -1056,10 +1198,17 @@ views.theme = async () => {
 };
 
 views.screens = async () => {
-  const [{ screens }, charts, { teams }] = await Promise.all([
-    api("/screens"), api("/charts/catalogue"), api("/teams")]);
+  const [{ screens }, charts, { groups, group_types }] = await Promise.all([
+    api("/screens"), api("/charts/catalogue"), api("/groups")]);
   state.cache.charts = charts;
-  const modes = ["whole_office", "per_team", "team_vs_team", "all_teams"];
+  const modes = ["whole_office", "per_group", "group_vs_group", "all_groups"];
+  const primary = group_types.find(t => t.is_primary) || group_types[0];
+  // A screen picks the axis it is organized along; every mode below then
+  // means "per that", so one set of modes covers every grouping.
+  const inAxis = (key) => {
+    const kind = group_types.find(t => t.key === key);
+    return kind ? groups.filter(g => g.type_id === kind.id) : [];
+  };
 
   section("Screens", "What a television shows. Preview here before anyone sees it on a wall.", `
     ${can("branch_manager") ? `<div class="card"><h3>New screen</h3>
@@ -1069,8 +1218,10 @@ views.screens = async () => {
         <div><label>Title on screen</label><input id="s-title" value="SALES LEADERBOARD"></div>
         <div><label>Rank by</label><select id="s-rank">${charts.metrics.map(m =>
           `<option value="${m.key}" ${m.key === "net_split" ? "selected" : ""}>${esc(m.label)}</option>`).join("")}</select></div>
+        <div><label>Group by</label><select id="s-axis">${group_types.map(t =>
+          `<option value="${esc(t.key)}" ${t.id === (primary || {}).id ? "selected" : ""}>${esc(t.plural_label)}</option>`).join("")}</select></div>
       </div>
-      <div id="s-teams" class="row" style="margin-top:.7rem" hidden></div>
+      <div id="s-groups" class="row" style="margin-top:.7rem" hidden></div>
       <h3 style="margin-top:1.1rem">Widgets</h3>
       <div id="s-widgets"></div>
       <div class="row" style="margin-top:.6rem">
@@ -1097,7 +1248,11 @@ views.screens = async () => {
           `<option value="${c.key}">${esc(c.label)}</option>`).join("")}</select></div>
         <div><label>Metric</label><select class="w-metric">${charts.metrics.map(m =>
           `<option value="${m.key}">${esc(m.label)}</option>`).join("")}</select></div>
-        <div><label>Group by</label><select class="w-group"><option value="team">Team</option><option value="rep">Rep</option></select></div>
+        <div><label>Group by</label><select class="w-group">
+          <option value="group">Whatever the board groups by</option>
+          <option value="rep">Rep</option>
+          ${group_types.map(t => `<option value="${esc(t.key)}">${esc(t.plural_label)}</option>`).join("")}
+        </select></div>
         <div><label>Target</label><input class="w-target" type="number" placeholder="—"></div>
         <div class="fixed"><button class="sm danger w-del">✕</button></div>`;
       row.querySelector(".w-del").onclick = () => row.remove();
@@ -1106,18 +1261,23 @@ views.screens = async () => {
     $("s-addw").onclick = () => $("s-widgets").appendChild(widgetRow());
     $("s-widgets").appendChild(widgetRow());
 
-    const teamPicker = () => {
+    const groupPicker = () => {
       const mode = $("s-mode").value;
-      const box = $("s-teams");
-      box.hidden = !(mode === "per_team" || mode === "team_vs_team");
-      box.innerHTML = mode === "per_team"
-        ? `<div><label>Team</label><select id="s-team">${teams.map(t => `<option>${esc(t.name)}</option>`).join("")}</select></div>`
-        : mode === "team_vs_team"
-        ? `<div><label>Team 1</label><select id="s-t1">${teams.map(t => `<option>${esc(t.name)}</option>`).join("")}</select></div>
-           <div><label>Team 2</label><select id="s-t2">${teams.map(t => `<option>${esc(t.name)}</option>`).join("")}</select></div>`
+      const axis = $("s-axis").value;
+      const kind = group_types.find(t => t.key === axis) || {};
+      const options = inAxis(axis).map(g => `<option>${esc(g.name)}</option>`).join("");
+      const box = $("s-groups");
+      box.hidden = !(mode === "per_group" || mode === "group_vs_group");
+      box.innerHTML = mode === "per_group"
+        ? `<div><label>${esc(kind.label || "Group")}</label><select id="s-group">${options}</select></div>`
+        : mode === "group_vs_group"
+        ? `<div><label>${esc(kind.label || "Group")} 1</label><select id="s-t1">${options}</select></div>
+           <div><label>${esc(kind.label || "Group")} 2</label><select id="s-t2">${options}</select></div>`
         : "";
     };
-    $("s-mode").onchange = teamPicker; teamPicker();
+    $("s-mode").onchange = groupPicker;
+    $("s-axis").onchange = groupPicker;
+    groupPicker();
 
     $("s-create").onclick = () => guard(async () => {
       const widgets = [...$("s-widgets").children].map(row => {
@@ -1131,9 +1291,12 @@ views.screens = async () => {
         return widget;
       });
       const mode = $("s-mode").value;
-      const config = { title: $("s-title").value, rank_by: $("s-rank").value, widgets };
-      if (mode === "per_team") config.team = $("s-team").value;
-      if (mode === "team_vs_team") config.teams = [$("s-t1").value, $("s-t2").value];
+      const config = {
+        title: $("s-title").value, rank_by: $("s-rank").value,
+        group_by: $("s-axis").value, widgets,
+      };
+      if (mode === "per_group") config.group = $("s-group").value;
+      if (mode === "group_vs_group") config.groups = [$("s-t1").value, $("s-t2").value];
       await api("/screens", { method: "POST", body: JSON.stringify({ name: $("s-name").value.trim(), mode, config }) });
       toast("Screen created", "good"); render();
     });
@@ -1288,7 +1451,11 @@ views.displays = async () => {
 };
 
 views.access = async () => {
-  const [{ people, roles }, { teams }] = await Promise.all([api("/users"), api("/teams")]);
+  const [{ people, roles }, { groups, group_types }] = await Promise.all([
+    api("/users"), api("/groups")]);
+  const kindOf = (id) => group_types.find(t => t.id === id)?.label || "Group";
+  const scopeOptions = groups.map(g =>
+    `<option value="${g.id}">${esc(kindOf(g.type_id))} \u00b7 ${esc(g.name)}</option>`).join("");
   const roleSelect = (id, current) =>
     `<select data-role="${id}" style="width:auto">${roles.map(r =>
       `<option value="${r}" ${r === current ? "selected" : ""}>${r}</option>`).join("")}</select>`;
@@ -1300,8 +1467,8 @@ views.access = async () => {
         <div><label>Name</label><input id="u-name"></div>
         <div><label>Role</label><select id="u-role">${roles.map(r =>
           `<option value="${r}" ${r === "viewer" ? "selected" : ""}>${r}</option>`).join("")}</select></div>
-        <div><label>Team (for a team lead)</label><select id="u-team">
-          <option value="">—</option>${teams.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join("")}
+        <div><label>Scope (for a lead or manager)</label><select id="u-scope">
+          <option value="">—</option>${scopeOptions}
         </select></div>
         <div class="fixed"><button class="primary" id="u-add">Add</button></div>
       </div></div>
@@ -1310,7 +1477,7 @@ views.access = async () => {
       <tbody>${people.map(p => `<tr>
         <td class="l"><b>${esc(p.email)}</b>${p.full_name ? `<br><span class="pill">${esc(p.full_name)}</span>` : ""}</td>
         <td class="l">${roleSelect(p.membership_id, p.role)}</td>
-        <td class="l">${p.team_id ? esc(teams.find(t => t.id === p.team_id)?.name || "team " + p.team_id)
+        <td class="l">${p.group_id ? esc(groups.find(g => g.id === p.group_id)?.name || "group " + p.group_id)
                         : p.branch_id ? "branch " + p.branch_id : "&mdash;"}</td>
         <td><button class="sm" data-reset="${p.membership_id}">Reset password</button>
             <button class="sm danger" data-remove="${p.membership_id}">Remove</button></td>
@@ -1318,10 +1485,10 @@ views.access = async () => {
     </table></div>`);
 
   $("u-add").onclick = () => guard(async () => {
-    const team = $("u-team").value;
+    const scope = $("u-scope").value;
     const created = await api("/users", { method: "POST", body: JSON.stringify({
       email: $("u-email").value.trim(), full_name: $("u-name").value.trim(),
-      role: $("u-role").value, team_id: team ? Number(team) : null }) });
+      role: $("u-role").value, group_id: scope ? Number(scope) : null }) });
     if (created.first_password) {
       // Shown once and never again, so it goes on the page rather than into a
       // toast that disappears while someone is reaching for a pen.
@@ -1359,7 +1526,7 @@ views.access = async () => {
 const MAPPABLE = [
   ["rep_name", "Name", "required"],
   ["rep_key", "Unique id", "falls back to the name"],
-  ["team", "Team", ""],
+  ["group", "Group", ""],
   ["home_branch", "Branch or office", ""],
   ["title", "Job title", ""],
   ["issued_leads", "Issued leads", ""],
@@ -1377,7 +1544,7 @@ function guessField(target, fields) {
   const wanted = {
     rep_name: ["name", "fullname", "rep", "salesrep", "employee"],
     rep_key: ["id", "employeeid", "repid", "code", "key"],
-    team: ["team", "crew", "squad", "group"],
+    group: ["team", "crew", "squad", "group"],
     home_branch: ["branch", "office", "location", "market"],
     title: ["title", "role", "position"],
     issued_leads: ["issued", "leadsissued", "issuedleads", "assigned"],
@@ -1411,7 +1578,7 @@ views.fields = async () => {
     ? `<span class="pill on">from the source</span>`
     : `<span class="pill">${esc(f.role)}</span>`;
 
-  section("Metrics", "What this company measures. A stored value comes from your source and is added up; a calculated one carries its formula and is worked out fresh at every level &mdash; so a team total can never disagree with the rows above it.", `
+  section("Metrics", "What this company measures. A stored value comes from your source and is added up; a calculated one carries its formula and is worked out fresh at every level &mdash; so a group total can never disagree with the rows above it.", `
     ${using_defaults ? `<div class="card"><b>Using the standard set.</b>
       <div class="hint" style="margin:.3rem 0 0">Adding or changing anything copies these in first, and they become yours.</div></div>` : ""}
 

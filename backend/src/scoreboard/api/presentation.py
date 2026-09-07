@@ -14,12 +14,13 @@ from scoreboard.api.deps import auth_context, require_role, user_scope
 from scoreboard.db import get_session
 from scoreboard.domain import charts
 from scoreboard.domain import theme as theme_domain
-from scoreboard.domain.leaderboard import MODES
+from scoreboard.domain.leaderboard import MODES, canonical_mode
 from scoreboard.domain.theme import resolve
-from scoreboard.models import DisplayToken, Role, Screen, Team, Theme
+from scoreboard.models import DisplayToken, Group, Role, Screen, Theme
 from scoreboard.security import generate_token
 from scoreboard.services import audit
-from scoreboard.services.auth import AuthContext, can_edit_team
+from scoreboard.services import groups as grp
+from scoreboard.services.auth import AuthContext, can_edit_group
 from scoreboard.services.screens import render
 from scoreboard.tenancy import TenantScope
 
@@ -52,7 +53,7 @@ def preview_theme(payload: ThemeRequest, _: AuthContext = Depends(auth_context))
 def list_themes(scope: TenantScope = Depends(user_scope)) -> dict:
     return {
         "themes": [
-            {"id": t.id, "scope": t.scope, "team_id": t.team_id,
+            {"id": t.id, "scope": t.scope, "group_id": t.group_id,
              "name": t.name, "tokens": t.tokens}
             for t in scope.all(Theme)
         ]
@@ -65,7 +66,7 @@ def _save_theme(
     payload: ThemeRequest,
     *,
     theme_scope: str,
-    team_id: int | None,
+    group_id: int | None,
 ) -> dict:
     problems = theme_domain.validate(payload.tokens)
     if problems:
@@ -79,10 +80,10 @@ def _save_theme(
             },
         )
 
-    existing = scope.one_by(Theme, scope=theme_scope, team_id=team_id)
+    existing = scope.one_by(Theme, scope=theme_scope, group_id=group_id)
     if existing is None:
         existing = scope.add(
-            Theme(scope=theme_scope, team_id=team_id, name=payload.name, tokens=payload.tokens)
+            Theme(scope=theme_scope, group_id=group_id, name=payload.name, tokens=payload.tokens)
         )
     else:
         existing.name = payload.name
@@ -97,7 +98,7 @@ def _save_theme(
     return {
         "id": existing.id,
         "scope": existing.scope,
-        "team_id": existing.team_id,
+        "group_id": existing.group_id,
         "tokens": existing.tokens,
         "readability": theme_domain.readability_report(existing.tokens),
     }
@@ -109,24 +110,24 @@ def save_org_theme(
     context: AuthContext = Depends(require_role(Role.org_admin)),
     scope: TenantScope = Depends(user_scope),
 ) -> dict:
-    return _save_theme(scope, context, payload, theme_scope="org", team_id=None)
+    return _save_theme(scope, context, payload, theme_scope="org", group_id=None)
 
 
-@router.put("/themes/team/{team_id}")
-def save_team_theme(
-    team_id: int,
+@router.put("/themes/group/{group_id}")
+def save_group_theme(
+    group_id: int,
     payload: ThemeRequest,
     context: AuthContext = Depends(require_role(Role.team_lead)),
     scope: TenantScope = Depends(user_scope),
     session: Session = Depends(get_session),
 ) -> dict:
-    """A team lead styles their own team and nobody else's."""
-    team = scope.get(Team, team_id)
-    if team is None:
-        raise HTTPException(status_code=404, detail="Team not found.")
-    if not can_edit_team(session, context, team):
-        raise HTTPException(status_code=403, detail="You cannot theme that team.")
-    return _save_theme(scope, context, payload, theme_scope="team", team_id=team_id)
+    """A team lead styles their own group and nobody else's."""
+    group = scope.get(Group, group_id)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Group not found.")
+    if not can_edit_group(session, context, group):
+        raise HTTPException(status_code=403, detail="You cannot theme that group.")
+    return _save_theme(scope, context, payload, theme_scope="group", group_id=group_id)
 
 
 # ---------------------------------------------------------------- screens
@@ -138,7 +139,7 @@ def chart_catalogue(_: AuthContext = Depends(auth_context)) -> dict:
 class ScreenRequest(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     mode: str = "whole_office"
-    team_id: int | None = None
+    group_id: int | None = None
     config: dict = Field(default_factory=dict)
 
 
@@ -147,19 +148,30 @@ def _screen_json(screen: Screen) -> dict:
         "id": screen.id,
         "name": screen.name,
         "mode": screen.mode,
-        "team_id": screen.team_id,
+        "group_id": screen.group_id,
         "config": screen.config,
     }
 
 
-def _validate_screen(payload: ScreenRequest) -> None:
-    if payload.mode not in MODES:
+def _validate_screen(payload: ScreenRequest, scope: TenantScope) -> None:
+    mode = canonical_mode(payload.mode)
+    if mode not in MODES:
         raise HTTPException(
             status_code=422, detail=f"Unknown mode. Choose one of: {', '.join(MODES)}."
         )
+    axes = tuple(kind.key for kind in grp.types_for(scope))
+    if payload.config.get("group_by") and payload.config["group_by"] not in axes:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown grouping. Choose one of: {', '.join(axes)}.",
+        )
+
+    from scoreboard.services.catalogue import catalogue_for
+
+    metrics = catalogue_for(scope)
     problems = {}
     for index, widget in enumerate(payload.config.get("widgets") or []):
-        found = charts.validate_widget(widget)
+        found = charts.validate_widget(widget, metrics, axes)
         if found:
             problems[str(index)] = found
     if problems:
@@ -177,12 +189,12 @@ def create_screen(
     context: AuthContext = Depends(require_role(Role.branch_manager)),
     scope: TenantScope = Depends(user_scope),
 ) -> dict:
-    _validate_screen(payload)
+    _validate_screen(payload, scope)
     screen = scope.add(
         Screen(
             name=payload.name,
-            mode=payload.mode,
-            team_id=payload.team_id,
+            mode=canonical_mode(payload.mode),
+            group_id=payload.group_id,
             config=payload.config,
         )
     )
@@ -205,10 +217,10 @@ def update_screen(
     screen = scope.get(Screen, screen_id)
     if screen is None:
         raise HTTPException(status_code=404, detail="Screen not found.")
-    _validate_screen(payload)
+    _validate_screen(payload, scope)
     screen.name = payload.name
-    screen.mode = payload.mode
-    screen.team_id = payload.team_id
+    screen.mode = canonical_mode(payload.mode)
+    screen.group_id = payload.group_id
     screen.config = payload.config
     audit.record(
         scope, "screen.update", actor_user_id=context.user.id,
@@ -333,8 +345,9 @@ def set_rotation(
 def preview_live(
     mode: str = "whole_office",
     rank_by: str = "net_split",
-    team: str = "",
-    teams: list[str] = Query(default=[]),
+    group: str = "",
+    groups: list[str] = Query(default=[]),
+    group_by: str = "",
     title: str = "",
     scope: TenantScope = Depends(user_scope),
 ) -> dict:
@@ -344,6 +357,7 @@ def preview_live(
     what a television would receive, so the preview is the real thing rather
     than a drawing of it.
     """
+    mode = canonical_mode(mode)
     if mode not in MODES:
         raise HTTPException(status_code=404, detail=f"Unknown mode '{mode}'.")
 
@@ -353,8 +367,9 @@ def preview_live(
         mode=mode,
         config={
             "rank_by": rank_by,
-            "team": team,
-            "teams": list(teams),
+            "group": group,
+            "groups": list(groups),
+            "group_by": group_by,
             "title": title or "PREVIEW",
             "refresh_seconds": 3600,
         },
@@ -398,15 +413,15 @@ def regenerate_display_token(
     }
 
 
-@router.get("/teams/{team_id}/stats")
-def team_stats(
-    team_id: int,
+@router.get("/groups/{group_id}/stats")
+def group_stats(
+    group_id: int,
     scope: TenantScope = Depends(user_scope),
 ) -> dict:
-    """One team's figures, its people, and charts of both.
+    """One group's figures, its people, and charts of both.
 
-    The same roll-up and the same chart builder the television uses, so a team
-    page in the console can never quietly disagree with the board on the wall.
+    The same roll-up and the same chart builder the television uses, so a
+    group page in the console can never quietly disagree with the wall.
     """
     from scoreboard.connectors.base import Period
     from scoreboard.domain import charts as chart_domain
@@ -414,19 +429,22 @@ def team_stats(
     from scoreboard.domain.metrics import METRIC_BY_KEY, roll_up
     from scoreboard.services.board import rows_for_period, trend
 
-    team = scope.get(Team, team_id)
-    if team is None:
-        raise HTTPException(status_code=404, detail="Team not found.")
+    group = scope.get(Group, group_id)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Group not found.")
 
+    axis = next(
+        (kind.key for kind in grp.types_for(scope) if kind.id == group.type_id), ""
+    )
     period = Period.current_month()
-    everyone = rows_for_period(scope, period)
-    members = [r for r in everyone if (r.get("team") or UNASSIGNED) == team.name]
+    everyone = rows_for_period(scope, period, group_by=axis)
+    members = [r for r in everyone if (r.get("group") or UNASSIGNED) == group.name]
     ranked = rank(members, "net_split")
 
     totals = roll_up(members)
     office = roll_up(everyone)
 
-    # Share of the office, so a team's number means something next to the
+    # Share of the office, so a group's number means something next to the
     # others rather than only next to itself.
     share = {
         key: (totals[key] / office[key] * 100) if office.get(key) else 0.0
@@ -447,9 +465,9 @@ def team_stats(
             continue
 
     return {
-        "team": {
-            "id": team.id, "name": team.name,
-            "lead_name": team.lead_name, "lead_role": team.lead_role,
+        "group": {
+            "id": group.id, "name": group.name, "type": axis,
+            "lead_name": group.lead_name, "lead_role": group.lead_role,
         },
         "member_count": len(members),
         "totals": totals,
@@ -465,7 +483,7 @@ def team_stats(
 
 @router.get("/overview")
 def overview(scope: TenantScope = Depends(user_scope)) -> dict:
-    """The whole office at a glance: totals, every team, and charts of both.
+    """The whole office at a glance: totals, every group, and charts of both.
 
     Built from the same roll-up and the same chart builder the television
     uses. A dashboard that computed its own numbers would eventually disagree
@@ -473,26 +491,30 @@ def overview(scope: TenantScope = Depends(user_scope)) -> dict:
     """
     from scoreboard.connectors.base import Period
     from scoreboard.domain import charts as chart_domain
-    from scoreboard.domain.leaderboard import team_totals
+    from scoreboard.domain.leaderboard import group_totals
     from scoreboard.domain.metrics import METRIC_BY_KEY, roll_up
     from scoreboard.services.board import rows_for_period, trend
-    from scoreboard.services.screens import org_tokens, team_tokens
+    from scoreboard.services.screens import group_tokens, org_tokens
 
     period = Period.current_month()
     rows = rows_for_period(scope, period)
     totals = roll_up(rows)
 
     base = org_tokens(scope)
-    overrides = team_tokens(scope)
-    teams_by_name = {team.name: team for team in scope.all(Team)}
+    overrides = group_tokens(scope)
+    axis = grp.primary_key(scope)
+    type_ids = {kind.id: kind.key for kind in grp.types_for(scope)}
+    by_name = {
+        g.name: g for g in scope.all(Group) if type_ids.get(g.type_id) == axis
+    }
 
     standings = []
-    for entry in team_totals(rows, "net_split"):
-        team = teams_by_name.get(entry["team"])
-        tokens = resolve(base, overrides.get(team.id)) if team else resolve(base)
+    for entry in group_totals(rows, "net_split"):
+        group = by_name.get(entry["group"])
+        tokens = resolve(base, overrides.get(group.id)) if group else resolve(base)
         standings.append({
-            "team_id": team.id if team else None,
-            "team": entry["team"],
+            "group_id": group.id if group else None,
+            "group": entry["group"],
             "rank": entry["rank"],
             "rep_count": entry["rep_count"],
             "colour": tokens.get("primary"),
@@ -503,10 +525,14 @@ def overview(scope: TenantScope = Depends(user_scope)) -> dict:
 
     widgets = []
     for spec in (
-        {"type": "bar", "metric": "net_split", "group_by": "team", "label": "Net split by team"},
-        {"type": "bar", "metric": "close_rate", "group_by": "team", "label": "Close rate by team"},
-        {"type": "donut", "metric": "sold_leads", "group_by": "team", "label": "Share of sales"},
-        {"type": "donut", "metric": "gross_split", "group_by": "team", "label": "Share of gross"},
+        {"type": "bar", "metric": "net_split", "group_by": "group",
+         "label": f"Net split by {axis}"},
+        {"type": "bar", "metric": "close_rate", "group_by": "group",
+         "label": f"Close rate by {axis}"},
+        {"type": "donut", "metric": "sold_leads", "group_by": "group",
+         "label": "Share of sales"},
+        {"type": "donut", "metric": "gross_split", "group_by": "group",
+         "label": "Share of gross"},
         {"type": "leaders", "metric": "net_split", "group_by": "rep", "limit": 5,
          "label": "Top five people"},
     ):

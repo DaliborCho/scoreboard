@@ -7,7 +7,7 @@ organizations, fails here rather than in a customer's account.
 import pytest
 
 from scoreboard.db import Base
-from scoreboard.models import GLOBAL_TABLES, Organization, Rep, Team, User
+from scoreboard.models import GLOBAL_TABLES, Group, Organization, Rep, User
 from scoreboard.tenancy import TenantScope
 
 
@@ -37,7 +37,7 @@ def test_scope_requires_an_organization():
 
 
 def test_scoped_models_are_reachable():
-    for model in (Rep, Team):
+    for model in (Rep, Group):
         TenantScope._require_scoped(model)  # must not raise
 
 

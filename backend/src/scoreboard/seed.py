@@ -18,15 +18,14 @@ from scoreboard.connectors.base import Period
 from scoreboard.db import session_factory
 from scoreboard.models import (
     ApiKey,
-    Branch,
     DisplayToken,
     Membership,
     Organization,
     Role,
-    Team,
     User,
 )
 from scoreboard.security import generate_token
+from scoreboard.services import groups
 from scoreboard.services.auth import create_user
 from scoreboard.services.refresh import apply_records
 from scoreboard.tenancy import TenantScope
@@ -100,26 +99,31 @@ def _install_artwork(scope: TenantScope, uploaded_by: int) -> None:
         scope.flush()
         return f"/assets/{stored.key}"
 
-    def save_theme(theme_scope: str, team_id: int | None, name: str, tokens: dict) -> None:
+    def save_theme(theme_scope: str, group_id: int | None, name: str, tokens: dict) -> None:
         # Run the same validation the API does. A seed that could plant an
         # unreadable board would make the rule a lie.
         problems = validate(tokens)
         if problems:
             print(f"  skipped {name} theme: {problems[0].message}")
             return
-        existing = scope.one_by(Theme, scope=theme_scope, team_id=team_id)
+        existing = scope.one_by(Theme, scope=theme_scope, group_id=group_id)
         if existing is None:
-            scope.add(Theme(scope=theme_scope, team_id=team_id, name=name, tokens=tokens))
+            scope.add(Theme(scope=theme_scope, group_id=group_id, name=name, tokens=tokens))
         else:
             existing.tokens = tokens
 
     save_theme("org", None, "Demo Brand", {**ORG_TOKENS, "hero_url": publish("hero-office.png")})
 
+    team_type = groups.type_by_key(scope, groups.TEAM)
     for team_name, slug, primary, accent in TEAMS:
-        team = scope.one_by(Team, name=team_name)
+        team = next(
+            (g for g in groups.groups_for(scope, team_type.id if team_type else None)
+             if g.name == team_name),
+            None,
+        )
         if team is None:
             continue
-        save_theme("team", team.id, slug, {
+        save_theme("group", team.id, slug, {
             "primary": primary, "accent": accent, "frame": "ornate",
             "badge_url": publish(f"badge-{slug}.png"),
             "hero_url": publish(f"hero-{slug}.png"),
@@ -162,14 +166,23 @@ def main() -> int:
 
     scope = TenantScope(session, org.id)
 
-    branch = scope.one_by(Branch, name="Olympia")
-    if branch is None:
-        branch = scope.add(Branch(name="Olympia"))
-        scope.flush()
+    # The two shipped groupings, then the demo structure inside them: one
+    # branch, four teams sitting under it. A person's branch is inferred from
+    # their team rather than stored twice, so nothing here assigns both.
+    groups.ensure_types(scope)
+    branch_type = groups.type_by_key(scope, groups.BRANCH)
+    team_type = groups.type_by_key(scope, groups.TEAM)
 
+    branch = next(
+        (g for g in groups.groups_for(scope, branch_type.id) if g.name == "Olympia"), None
+    )
+    if branch is None:
+        branch = groups.create_group(scope, branch_type.id, "Olympia", lead_role="Branch Manager")
+
+    existing = {g.name for g in groups.groups_for(scope, team_type.id)}
     for name, *_ in TEAMS:
-        if scope.one_by(Team, name=name) is None:
-            scope.add(Team(name=name, branch_id=branch.id, lead_name="", lead_role="Sales Manager"))
+        if name not in existing:
+            groups.create_group(scope, team_type.id, name, parent_id=branch.id)
     scope.commit()
 
     # The platform operator stands outside every organization, so it gets no

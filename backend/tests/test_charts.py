@@ -11,9 +11,9 @@ from scoreboard.domain.leaderboard import RepRow
 
 
 def rows():
-    def rep(name, team, issued, sold, gross, net):
+    def rep(name, group, issued, sold, gross, net):
         return RepRow(
-            rep_key=name.lower(), rep_name=name, team=team,
+            rep_key=name.lower(), rep_name=name, group=group,
             components={
                 "issued_leads": issued, "pitched_leads": issued * 0.6, "sold_leads": sold,
                 "gross_split": gross, "pending_split": 0, "net_split": net,
@@ -39,12 +39,13 @@ def test_unchartable_metric_is_rejected():
 
 def test_donut_refuses_a_rate():
     """A slice of a pie has to mean a share of a whole. A rate has no whole."""
-    problems = charts.validate_widget({"type": "donut", "metric": "close_rate", "group_by": "team"})
+    problems = charts.validate_widget(
+        {"type": "donut", "metric": "close_rate", "group_by": "group"})
     assert any("share of a total" in p for p in problems)
 
 
 def test_donut_accepts_an_additive_metric():
-    widget = {"type": "donut", "metric": "net_split", "group_by": "team"}
+    widget = {"type": "donut", "metric": "net_split", "group_by": "group"}
     assert charts.validate_widget(widget) == []
 
 
@@ -63,8 +64,8 @@ def test_big_number_matches_the_office_total():
     assert widget["value"] == 508_000
 
 
-def test_bar_totals_each_team_through_the_shared_roll_up():
-    widget = charts.build({"type": "bar", "metric": "net_split", "group_by": "team"}, rows())
+def test_bar_totals_each_group_through_the_shared_roll_up():
+    widget = charts.build({"type": "bar", "metric": "net_split", "group_by": "group"}, rows())
     values = {s["label"]: s["value"] for s in widget["series"]}
     assert values["Alpha"] == 240_000
     assert values["Bravo"] == 260_000
@@ -82,25 +83,25 @@ def test_grouping_by_rep_lists_people():
 def test_donut_slices_sum_to_the_whole():
     """Trimming to the top few must not silently shrink the pie."""
     widget = charts.build(
-        {"type": "donut", "metric": "net_split", "group_by": "team", "limit": 2}, rows()
+        {"type": "donut", "metric": "net_split", "group_by": "group", "limit": 2}, rows()
     )
     assert sum(s["value"] for s in widget["series"]) == widget["total"]
     assert widget["series"][-1]["label"] == "Other"
 
 
 def test_donut_without_a_remainder_has_no_other_slice():
-    widget = charts.build({"type": "donut", "metric": "net_split", "group_by": "team"}, rows())
+    widget = charts.build({"type": "donut", "metric": "net_split", "group_by": "group"}, rows())
     assert all(s["label"] != "Other" for s in widget["series"])
 
 
 def test_series_are_capped_even_when_a_larger_limit_is_asked_for():
     many = [
-        RepRow(rep_key=f"r{i}", rep_name=f"R{i}", team=f"Team {i}",
+        RepRow(rep_key=f"r{i}", rep_name=f"R{i}", group=f"Team {i}",
                components={"net_split": 100 - i}).as_row()
         for i in range(20)
     ]
     widget = charts.build(
-        {"type": "bar", "metric": "net_split", "group_by": "team", "limit": 99}, many
+        {"type": "bar", "metric": "net_split", "group_by": "group", "limit": 99}, many
     )
     assert len(widget["series"]) == charts.MAX_SERIES
     assert widget["hidden"] == 20 - charts.MAX_SERIES
@@ -127,3 +128,39 @@ def test_catalogue_is_consistent_with_the_types():
     catalogue = charts.catalogue()
     assert {c["key"] for c in catalogue["charts"]} == set(charts.CHART_BY_KEY)
     assert catalogue["max_series"] == charts.MAX_SERIES
+
+
+def test_a_chart_can_break_down_along_a_different_axis_than_the_board():
+    """A board ranked by team, carrying a chart of branches, off one query."""
+    from scoreboard.domain.leaderboard import RepRow
+
+    people = [
+        RepRow(rep_key="a", rep_name="Ana", group="Alpha",
+               groups={"team": "Alpha", "branch": "North"},
+               components={"net_split": 10_000}),
+        RepRow(rep_key="b", rep_name="Boris", group="Bravo",
+               groups={"team": "Bravo", "branch": "North"},
+               components={"net_split": 30_000}),
+        RepRow(rep_key="c", rep_name="Cvija", group="Charlie",
+               groups={"team": "Charlie", "branch": "South"},
+               components={"net_split": 20_000}),
+    ]
+    rows = [person.as_row() for person in people]
+
+    by_team = charts.build({"type": "bar", "metric": "net_split", "group_by": "group"}, rows)
+    assert len(by_team["series"]) == 3
+
+    by_branch = charts.build({"type": "bar", "metric": "net_split", "group_by": "branch"}, rows)
+    assert {s["label"]: s["value"] for s in by_branch["series"]} == {
+        "North": 40_000, "South": 20_000
+    }
+
+
+def test_a_chart_cannot_group_by_an_axis_the_rows_do_not_carry():
+    """Refused loudly, because a silent empty chart on a wall reads as broken."""
+    from scoreboard.domain.leaderboard import RepRow
+
+    rows = [RepRow(rep_key="a", rep_name="Ana", group="Alpha",
+                   groups={"team": "Alpha"}, components={"net_split": 1}).as_row()]
+    with pytest.raises(charts.ChartError):
+        charts.build({"type": "bar", "metric": "net_split", "group_by": "region"}, rows)

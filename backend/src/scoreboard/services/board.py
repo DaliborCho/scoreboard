@@ -1,9 +1,13 @@
 """Reading stored data back out as leaderboard rows.
 
-Resolves the ownership split at query time: a rep's displayed team is the
-locally assigned one when there is one, and the team the source reported
-otherwise. That fallback is what lets a customer start seeing a useful board
-before anyone has opened the team builder.
+Resolves the ownership split at query time: a person's group is the one the
+customer assigned them to, and the one the source reported otherwise. That
+fallback is what lets a customer see a useful board before anyone has opened
+the group builder.
+
+Which axis a board is grouped by — team, branch, region — is a parameter, not
+a table. Every row also carries all of its groups, so a chart can break the
+same figures down a different way without a second query.
 """
 from __future__ import annotations
 
@@ -13,7 +17,8 @@ from sqlalchemy import func, select
 
 from scoreboard.connectors.base import Period
 from scoreboard.domain.leaderboard import UNASSIGNED, RepRow
-from scoreboard.models import Rep, RepMetrics, Team
+from scoreboard.models import Rep, RepMetrics
+from scoreboard.services import groups as grp
 from scoreboard.tenancy import TenantScope
 
 
@@ -29,12 +34,17 @@ def _latest_capture(scope: TenantScope, period: Period) -> date | None:
 
 
 def rows_for_period(
-    scope: TenantScope, period: Period, captured_on: date | None = None, metrics=None
+    scope: TenantScope,
+    period: Period,
+    captured_on: date | None = None,
+    metrics=None,
+    group_by: str = "",
 ) -> list[dict]:
     from scoreboard.services.catalogue import catalogue_for
 
     metrics = metrics or catalogue_for(scope)
-    team_names = {team.id: team.name for team in scope.all(Team)}
+    axis = group_by or grp.primary_key(scope)
+    assignments = grp.memberships_for(scope)
 
     statement = (
         select(Rep, RepMetrics)
@@ -66,12 +76,22 @@ def rows_for_period(
     # and `metrics` is now the organization's catalogue. Naming both the same
     # made the catalogue silently become a database row inside this loop.
     for rep, captured in scope.session.execute(statement).all():
-        team = team_names.get(rep.team_id) or rep.source_team or UNASSIGNED
+        mine = {key: group.name for key, group in (assignments.get(rep.id) or {}).items()}
+
+        # What the source said is a fallback for the shipped axes only. A
+        # customer-invented grouping has no source column to fall back to, and
+        # inventing one would put people in groups nobody assigned them to.
+        if grp.TEAM not in mine and rep.source_team:
+            mine[grp.TEAM] = rep.source_team
+        if grp.BRANCH not in mine and rep.home_branch:
+            mine[grp.BRANCH] = rep.home_branch
+
         rows.append(
             RepRow(
                 rep_key=rep.rep_key,
                 rep_name=rep.name,
-                team=team,
+                group=mine.get(axis) or UNASSIGNED,
+                groups=mine,
                 home_branch=rep.home_branch,
                 title=rep.title,
                 hire_date=rep.hire_date,
