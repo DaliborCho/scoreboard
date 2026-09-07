@@ -1592,8 +1592,10 @@ views.access = async () => {
       <tbody>${people.map(p => `<tr>
         <td class="l"><b>${esc(p.email)}</b>${p.full_name ? `<br><span class="pill">${esc(p.full_name)}</span>` : ""}</td>
         <td class="l">${roleSelect(p.membership_id, p.role)}</td>
-        <td class="l">${p.group_id ? esc(groups.find(g => g.id === p.group_id)?.name || "group " + p.group_id)
-                        : p.branch_id ? "branch " + p.branch_id : "&mdash;"}</td>
+        <td class="l">${p.group_id
+          ? esc(kindOf(groups.find(g => g.id === p.group_id)?.type_id) + " · ") +
+            esc(groups.find(g => g.id === p.group_id)?.name || "group " + p.group_id)
+          : "&mdash;"}</td>
         <td><button class="sm" data-reset="${p.membership_id}">Reset password</button>
             <button class="sm danger" data-remove="${p.membership_id}">Remove</button></td>
       </tr>`).join("")}</tbody>

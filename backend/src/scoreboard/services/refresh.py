@@ -5,8 +5,8 @@ pushed payload or a CSV upload, they land here and are applied by the same
 rules, so no source can develop its own private behaviour.
 
 The rule that matters: a refresh writes numbers and identity fields. It never
-writes `Rep.team_id`. Team structure belongs to the customer and survives
-every refresh, which is the whole reason the original product existed.
+writes a group membership. Structure belongs to the customer and survives every
+refresh, which is the whole reason the original product existed.
 """
 from __future__ import annotations
 
@@ -111,7 +111,7 @@ def apply_records(
             existing[key] = rep
             result.reps_created += 1
         else:
-            # Identity fields follow the source; team_id deliberately does not.
+            # Identity fields follow the source; group membership does not.
             rep.name = record.rep_name or rep.name
             rep.source_team = record.source_team or rep.source_team
             rep.home_branch = record.home_branch or rep.home_branch

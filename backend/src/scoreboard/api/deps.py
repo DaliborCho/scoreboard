@@ -117,8 +117,8 @@ def user_scope(
 def require_role(minimum: Role):
     """Dependency factory guarding an endpoint by rank.
 
-    Rank alone is not enough for anything team-shaped; those endpoints also
-    run `can_edit_team`, because a team lead has full authority over one team
+    Rank alone is not enough for anything group-shaped; those endpoints also
+    run `can_edit_group`, because a team lead has full authority over one team
     and none at all over the next.
     """
 

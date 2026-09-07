@@ -66,7 +66,7 @@ jobs:
           node-version: "22"
 
       - name: Syntax-check the served pages
-        # The two HTML pages have no build step, so nothing else catches a
+        # The served pages have no build step, so nothing else catches a
         # broken string literal until a browser shows a blank screen.
         run: python tools/check_pages.py
 
