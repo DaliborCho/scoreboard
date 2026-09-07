@@ -70,6 +70,18 @@ jobs:
         # broken string literal until a browser shows a blank screen.
         run: python tools/check_pages.py
 
+  kiosk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The television's half runs where nobody is watching, on a machine we
+      # have no access to. A shell mistake there is a dark wall, discovered by
+      # whoever walks past it.
+      - name: Shellcheck the kiosk scripts
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck kiosk/kiosk.sh kiosk/install.sh
+
   migrations:
     runs-on: ubuntu-latest
     services:

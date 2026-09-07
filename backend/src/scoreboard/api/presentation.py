@@ -296,6 +296,48 @@ def attach_screen(
     return {"ok": True, "display_id": display.id, "screen_id": display.screen_id}
 
 
+@router.post("/display-tokens/{display_id}/reload")
+def reload_display(
+    display_id: int,
+    context: AuthContext = Depends(require_role(Role.branch_manager)),
+    scope: TenantScope = Depends(user_scope),
+) -> dict:
+    """Make one television reload itself on its next poll.
+
+    There is no agent on the machine and none is wanted: a wall may be a
+    browser on a Pi in the next room or a screen in another building, and
+    neither can be reached from here. The board is already asking us a
+    question every few seconds, so the answer simply carries a number that
+    changed.
+    """
+    display = scope.get(DisplayToken, display_id)
+    if display is None:
+        raise HTTPException(status_code=404, detail="Display not found.")
+
+    display.reload_nonce = (display.reload_nonce or 0) + 1
+    audit.record(
+        scope, "display_token.reload", actor_user_id=context.user.id,
+        actor_label=context.user.email, target=display.name,
+    )
+    scope.commit()
+
+    seconds = 0
+    screen = scope.get(Screen, display.screen_id) if display.screen_id else None
+    if screen:
+        seconds = int((screen.config or {}).get("refresh_seconds") or 20)
+    return {
+        "ok": True,
+        "reload": display.reload_nonce,
+        # Said plainly, because "nothing happened" for twenty seconds is the
+        # obvious way for somebody to conclude the button is broken.
+        "note": (
+            f"The screen reloads within {seconds or 20} seconds, on its next poll."
+            if display.last_seen_at
+            else "This display has never been seen. It will reload when it first connects."
+        ),
+    }
+
+
 class RotationRequest(BaseModel):
     screen_ids: list[int] = Field(default_factory=list, max_length=12)
     seconds: int = Field(default=30, ge=5, le=3600)

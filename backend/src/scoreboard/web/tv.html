@@ -601,6 +601,23 @@ function render(data) {
   }
 }
 
+// What this screen was told on its first successful poll. A wall has nobody
+// beside it to press F5, so two things reload it: somebody pressing Refresh in
+// the console, and the served page itself changing under it after a deploy.
+let control = null;
+
+function shouldReload(next) {
+  if (!next) return false;
+  if (control === null) { control = next; return false; }
+  if (next.reload === control.reload && next.build === control.build) return false;
+  // Cache-busted, because the reason for reloading is usually that the file
+  // this page is running from is no longer the current one.
+  const url = new URL(location.href);
+  url.searchParams.set("v", String(next.build || next.reload || Date.now()));
+  location.replace(url.toString());
+  return true;
+}
+
 async function tick() {
   const url = nextScreenId ? `${ENDPOINT}?screen_id=${nextScreenId}` : ENDPOINT;
   try {
@@ -612,6 +629,7 @@ async function tick() {
     const data = await response.json();
     lastGood = Date.now();
     consecutiveFailures = 0;
+    if (shouldReload(data.control)) return;
     render(data);
   } catch (error) {
     consecutiveFailures += 1;

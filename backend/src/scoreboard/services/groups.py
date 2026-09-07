@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from scoreboard.models import Group, GroupMembership, GroupType, Rep
+from scoreboard.models import Group, GroupMembership, GroupType, Rep, RetiredGroup
 from scoreboard.tenancy import TenantScope
 
 # key, label, plural, position, primary
@@ -142,6 +142,41 @@ def make_primary(scope: TenantScope, kind: GroupType) -> None:
     scope.flush()
 
 
+def retire(scope: TenantScope, group: Group) -> None:
+    """Remember that this name was removed on purpose.
+
+    A board falls back to what the source reported when nobody was assigned
+    locally, which is what makes it useful before anyone has opened the group
+    builder — and which means a deleted group reappears on the next refresh
+    unless we write down that it was deleted.
+    """
+    already = next(
+        (r for r in scope.all(RetiredGroup)
+         if r.type_id == group.type_id and r.name == group.name),
+        None,
+    )
+    if already is None:
+        scope.add(RetiredGroup(type_id=group.type_id, name=group.name))
+
+
+def revive(scope: TenantScope, type_id: int, name: str) -> None:
+    """Let a name back onto boards. Creating a group by that name does this."""
+    for row in scope.all(RetiredGroup):
+        if row.type_id == type_id and row.name == name:
+            scope.delete(row)
+
+
+def retired_names(scope: TenantScope) -> dict[str, set[str]]:
+    """Names the source may no longer put back, keyed by group type."""
+    types = {kind.id: kind.key for kind in types_for(scope)}
+    out: dict[str, set[str]] = {}
+    for row in scope.all(RetiredGroup):
+        key = types.get(row.type_id)
+        if key:
+            out.setdefault(key, set()).add(row.name)
+    return out
+
+
 def delete_type(scope: TenantScope, kind: GroupType) -> None:
     if kind.is_builtin:
         raise GroupError(
@@ -246,6 +281,9 @@ def create_group(
             lead_name=lead_name, lead_role=lead_role,
         )
     )
+    # Creating a name back is how somebody says they want it after all, so a
+    # retirement is lifted here rather than needing its own button.
+    revive(scope, type_id, name)
     scope.flush()
     return group
 

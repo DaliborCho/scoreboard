@@ -163,6 +163,37 @@ appear on a wall.
 Adding a customer's own system means adding one module to `connectors/` and
 one line to its registry. Nothing downstream changes.
 
+## Running it as an appliance
+
+A single office does not need a server anywhere else. The whole product runs
+on the machine behind the television:
+
+```bash
+docker compose up -d
+sudo ./kiosk/install.sh http://localhost:8000/tv/tv_xxxxxxxxxx
+```
+
+`kiosk/` is the television's half, and it runs nowhere near the server. It
+waits for the board to answer before opening anything, launches Chromium full
+screen against a profile nothing else touches, stops the screen sleeping, and
+**reopens the browser whenever it exits** — a crash, an update, somebody
+closing the window. It is a loop, not a launcher, because the one thing a wall
+never has is somebody standing next to it.
+
+Nothing leaves the building, there is no monthly cost, and there is nothing to
+explain to anyone's IT department. The multi-tenant machinery is still there;
+it simply has one tenant and stays out of the way until there is a second.
+
+The kiosk has **no connection to the server** — no agent, no port, no
+credential beyond the display link. Everything remote happens the other way
+round: the board is already asking a question every few seconds, so the answer
+carries what it needs. **Refresh TV** in the console bumps a number the board
+notices; a deployment changes the served page's own digest and every board
+reloads itself. The script exists for the one thing a web page may not do to
+itself — go full screen without somebody clicking first.
+
+`kiosk/README.md` has the details.
+
 ## Structure
 
 A company is divided along axes it chooses. There used to be a `teams` table
@@ -180,6 +211,9 @@ moment it exists.
 Two rules hold it together, both enforced rather than remembered:
 
 - **One group per person per axis** is a unique constraint.
+- **A deleted group stays deleted.** The board falls back to the team the
+  source reported, so removing one would otherwise put the name straight back
+  on the next refresh. Creating the name again lets it in.
 - **A group may sit inside a group of another type**, and membership and
   authority both flow down that chain. Somebody on Team Alpha, which sits in
   the Olympia branch, is in Olympia — inferred, never stored twice, so the two
@@ -322,7 +356,10 @@ is showing something nobody will ever see on a wall.
 ## Displays
 
 A television carries a long unguessable link instead of signing in, and can
-either sit on one screen or cycle through several. The next screen in a cycle
+either sit on one screen or cycle through several. The Displays page says when
+each screen last asked for data — `live · 4s ago` against `3 days ago` is the
+difference between a wall that is working and one that has been dark since
+Friday without anybody noticing. The next screen in a cycle
 is chosen by the server and carried in the payload, so a rotation edited in the
 console takes effect on the next tick rather than when someone remembers to
 reload the wall.

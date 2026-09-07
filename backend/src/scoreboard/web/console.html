@@ -1452,6 +1452,23 @@ views.screens = async () => {
 
 views.displays = async () => {
   const [{ displays }, { screens }] = await Promise.all([api("/display-tokens"), api("/screens")]);
+
+  // "2026-09-07 11:03" tells you nothing at a glance. "4s ago" or "3 days ago"
+  // is the difference between a wall that is working and one that has been
+  // dark since Friday without anyone noticing.
+  const seen = (stamp) => {
+    if (!stamp) return '<span class="pill">never</span>';
+    const seconds = Math.max(0, Math.round((Date.now() - new Date(stamp).getTime()) / 1000));
+    const text = seconds < 90 ? `${seconds}s ago`
+      : seconds < 5400 ? `${Math.round(seconds / 60)} min ago`
+      : seconds < 172800 ? `${Math.round(seconds / 3600)} h ago`
+      : `${Math.round(seconds / 86400)} days ago`;
+    // Two minutes is generous: the slowest screen polls once a minute.
+    return seconds < 120
+      ? `<span class="pill on">live &middot; ${esc(text)}</span>`
+      : `<span class="pill off">${esc(text)}</span>`;
+  };
+
   section("Displays", "A television cannot sign in, so it carries a long link instead. Revoking it cuts the screen off.", `
     <div class="card"><h3>New display</h3><div class="row">
       <div><label>Name</label><input id="d-name" placeholder="Front office TV"></div>
@@ -1474,12 +1491,18 @@ views.displays = async () => {
           <option value="">— whole office —</option>
           ${screens.map(s => `<option value="${s.id}" ${s.id === d.screen_id ? "selected" : ""}>${esc(s.name)}</option>`).join("")}
         </select></td>
-        <td class="l">${d.last_seen_at ? esc(d.last_seen_at.slice(0, 16).replace("T", " ")) : "never"}</td>
+        <td class="l">${seen(d.last_seen_at)}</td>
         <td>${d.revoked ? '<span class="pill off">revoked</span>'
-             : `<button class="sm" data-newlink="${d.id}">New link</button>
+             : `<button class="sm" data-reload="${d.id}">Refresh TV</button>
+                <button class="sm" data-newlink="${d.id}">New link</button>
                 <button class="sm danger" data-revoke="${d.id}">Revoke</button>`}</td>
       </tr>`).join("") || `<tr><td class="l" colspan="4">No displays yet.</td></tr>`}</tbody>
     </table></div>`);
+
+  onClick("[data-reload]", node => guard(async () => {
+    const result = await api(`/display-tokens/${node.dataset.reload}/reload`, { method: "POST" });
+    toast(result.note, "good");
+  }));
 
   $("d-add").onclick = () => guard(async () => {
     const created = await api("/display-tokens", { method: "POST",

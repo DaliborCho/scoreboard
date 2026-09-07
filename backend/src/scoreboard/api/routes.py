@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 
 from scoreboard.api.deps import api_key_scope, display_scope
+from scoreboard.build import build_id
 from scoreboard.connectors import catalogue
 from scoreboard.connectors.base import Period, SourceRecord
 from scoreboard.db import get_session
@@ -251,6 +252,10 @@ def display_screen(
 
     payload = render(scope, screen, period=period)
     payload["display"] = {"name": display_token.name}
+    # Two reasons a wall should reload itself, carried on every poll because
+    # nobody is standing next to it to do it by hand: somebody pressed Refresh
+    # in the console, or the served page itself changed under it.
+    payload["control"] = {"reload": display_token.reload_nonce, "build": build_id()}
     payload["rotation"] = (
         {
             "screen_ids": cycle,

@@ -45,6 +45,9 @@ def rows_for_period(
     metrics = metrics or catalogue_for(scope)
     axis = group_by or grp.primary_key(scope)
     assignments = grp.memberships_for(scope)
+    # Names a customer deliberately removed. Without this the source puts them
+    # straight back, because the fallback below trusts whatever it reports.
+    retired = grp.retired_names(scope)
 
     statement = (
         select(Rep, RepMetrics)
@@ -81,10 +84,12 @@ def rows_for_period(
         # What the source said is a fallback for the shipped axes only. A
         # customer-invented grouping has no source column to fall back to, and
         # inventing one would put people in groups nobody assigned them to.
-        if grp.TEAM not in mine and rep.source_team:
-            mine[grp.TEAM] = rep.source_team
-        if grp.BRANCH not in mine and rep.home_branch:
-            mine[grp.BRANCH] = rep.home_branch
+        #
+        # A retired name is never accepted from the source. Deleting a group
+        # has to mean it is gone, not gone until the next refresh.
+        for key, reported in ((grp.TEAM, rep.source_team), (grp.BRANCH, rep.home_branch)):
+            if key not in mine and reported and reported not in retired.get(key, ()):
+                mine[key] = reported
 
         rows.append(
             RepRow(

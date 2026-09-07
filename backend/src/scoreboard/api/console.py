@@ -484,6 +484,9 @@ def delete_group(
             )
         membership.group_id = target.id
 
+    # Written down before the row goes, so the source cannot put the name back
+    # on the next refresh through the board's fallback.
+    grp.retire(scope, group)
     audit.record(
         scope, "group.delete", actor_user_id=context.user.id,
         actor_label=context.user.email, target=group.name,

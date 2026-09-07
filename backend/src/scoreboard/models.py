@@ -216,6 +216,31 @@ class Group(Base, TimestampMixin):
     type: Mapped[GroupType] = relationship(back_populates="groups")
 
 
+class RetiredGroup(Base, TimestampMixin):
+    """A group name a customer deliberately removed.
+
+    Without this the source quietly puts it back. A board falls back to the
+    team the source reports when nobody has been assigned locally, which is
+    what lets a customer see something useful on day one — and it means
+    deleting "Team Alpha" removes the group while every one of its people
+    keeps arriving with `source_team = "Team Alpha"`, so the name is on the
+    wall again on the next refresh.
+
+    Taken from the original product, which hit this first and solved it the
+    same way.
+    """
+
+    __tablename__ = "retired_groups"
+    __table_args__ = (
+        UniqueConstraint("org_id", "type_id", "name", name="uq_retired_group_org_type_name"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+    type_id: Mapped[int] = mapped_column(ForeignKey("group_types.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+
+
 class GroupMembership(Base, TimestampMixin):
     """A person's place on one axis.
 
@@ -409,6 +434,15 @@ class DisplayToken(Base, TimestampMixin):
     # rather than on the screen, because the same screen is often shown on one
     # wall permanently and in a cycle on another.
     rotation: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+    # Bumped from the console to make this television reload itself.
+    #
+    # A wall has nobody standing beside it, so there is no way to press F5 on
+    # it. The screen already polls; it carries this number back each time and
+    # reloads when it changes. That is the whole mechanism — no agent on the
+    # machine, and it works whether the screen is on this server's own Pi or
+    # on a television across a city.
+    reload_nonce: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -387,3 +387,86 @@ def test_deleting_an_organization_removes_its_structure(org):
     assert [g for g in session.query(Group).all() if g.org_id == org_id] == []
     assert [t for t in session.query(GroupType).all() if t.org_id == org_id] == []
     session.close()
+
+
+def test_a_deleted_group_does_not_come_back_through_the_source(org):
+    """The defect the original product had already solved.
+
+    A board falls back to the team the source reported when nobody has been
+    assigned locally. That is what makes it useful before anyone opens the
+    group builder, and it meant deleting a group removed the row while every
+    one of its people kept arriving with the same `source_team` -- so the name
+    was back on the wall on the next refresh. Deleting has to mean deleted.
+    """
+    from scoreboard.services import groups as grp
+
+    _load(org, [
+        ("a", "Ana", "Alpha", "", {"sold_leads": 1}),
+        ("b", "Boris", "Bravo", "", {"sold_leads": 1}),
+    ])
+    assert {r["group"] for r in _rows(org, "team")} == {"Alpha", "Bravo"}
+
+    team_type = grp.type_by_key(org, grp.TEAM)
+    alpha = grp.create_group(org, team_type.id, "Alpha")
+    org.commit()
+
+    grp.retire(org, alpha)
+    org.delete(alpha)
+    org.commit()
+
+    groups = {r["group"] for r in _rows(org, "team")}
+    assert "Alpha" not in groups, "a deleted name must not return with the next refresh"
+    assert groups == {"Bravo", "Unassigned"}, "and the people are still on the board"
+
+
+def test_a_refresh_after_the_deletion_still_cannot_bring_it_back(org):
+    """The refresh is the moment it used to reappear, so run one."""
+    from scoreboard.services import groups as grp
+
+    _load(org, [("a", "Ana", "Alpha", "", {"sold_leads": 1})])
+    team_type = grp.type_by_key(org, grp.TEAM)
+    alpha = grp.create_group(org, team_type.id, "Alpha")
+    org.commit()
+    grp.retire(org, alpha)
+    org.delete(alpha)
+    org.commit()
+
+    _load(org, [("a", "Ana", "Alpha", "", {"sold_leads": 9})])
+
+    rows = _rows(org, "team")
+    assert rows[0]["group"] == "Unassigned"
+    assert rows[0]["sold_leads"] == 9, "the figures still follow the source"
+
+
+def test_creating_the_name_again_lets_it_back(org):
+    """Retirement is a decision, not a permanent ban."""
+    from scoreboard.services import groups as grp
+
+    _load(org, [("a", "Ana", "Alpha", "", {"sold_leads": 1})])
+    team_type = grp.type_by_key(org, grp.TEAM)
+    alpha = grp.create_group(org, team_type.id, "Alpha")
+    org.commit()
+    grp.retire(org, alpha)
+    org.delete(alpha)
+    org.commit()
+    assert _rows(org, "team")[0]["group"] == "Unassigned"
+
+    grp.create_group(org, team_type.id, "Alpha")
+    org.commit()
+    assert _rows(org, "team")[0]["group"] == "Alpha"
+
+
+def test_retiring_a_name_on_one_axis_leaves_the_other_alone(org):
+    """"North" as a retired branch must not silence "North" as a region."""
+    from scoreboard.services import groups as grp
+
+    _load(org, [("a", "Ana", "North", "North", {"sold_leads": 1})])
+    branch_type = grp.type_by_key(org, grp.BRANCH)
+    north = grp.create_group(org, branch_type.id, "North")
+    org.commit()
+    grp.retire(org, north)
+    org.delete(north)
+    org.commit()
+
+    assert _rows(org, "branch")[0]["group"] == "Unassigned"
+    assert _rows(org, "team")[0]["group"] == "North", "the team axis is untouched"
