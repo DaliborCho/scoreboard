@@ -7,6 +7,29 @@ measures, how it looks, and the screens on the office televisions.
 `scoreboard` is a working codename. Run `python tools/rename.py <name>` once
 the product name is decided.
 
+## Reading this for the first time
+
+The fastest way in is the system map, which is served by the application
+itself and draws every part of it:
+
+```bash
+docker compose up -d --build
+docker compose exec api python -m scoreboard.seed
+```
+
+| | |
+|---|---|
+| System map | <http://localhost:8000/architecture> |
+| Company console | <http://localhost:8000/console> — `demo` / `demo` |
+| Platform admin | <http://localhost:8000/admin> — `admin` / `admin` |
+| A television | Displays → create a link → open it |
+
+Those credentials are the seed script's, written down because a demo nobody
+can sign into is not a demo. `scoreboard.seed` resets them on every run, which
+is why it must never be pointed at an installation with real customers on it.
+
+**This repository is readable, not reusable.** See [COPYRIGHT.md](COPYRIGHT.md).
+
 ## Where this came from
 
 A single-office Raspberry Pi leaderboard, later a Windows desktop app, that
